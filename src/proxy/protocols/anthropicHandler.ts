@@ -9,6 +9,7 @@ import { PowPoolManager } from '../pow/powPoolManager';
 import { PacingManager } from '../security/pacingManager';
 import { CircuitBreaker } from '../security/circuitBreaker';
 import { buildRealisticHeaders } from '../security/fingerprint';
+import { estimateTokens } from '../agent/tokenEstimator';
 
 function sendError(res: http.ServerResponse, status: number, errType: string, message: string) {
   if (!res.headersSent) {
@@ -210,6 +211,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
   }
 
   const prompt = PromptInjector.formatAnthropicToPrompt(payload.system, payload.messages, payload.tools);
+  const inputTokens = estimateTokens(prompt);
   const modelStr = (payload.model || '').toLowerCase();
   // 默认极速优先：只有当明确指定 reasoner / r1 或 deepseek-web(无chat) 时才开启 R1 深度思考；默认全面使用 deepseek-chat-web 极速响应
   const isReasoner = (modelStr.includes('reasoner') || modelStr.includes('r1') || modelStr === 'deepseek-web') && !modelStr.includes('chat') && !modelStr.includes('fast');
@@ -322,7 +324,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
             content: [],
             stop_reason: null,
             stop_sequence: null,
-            usage: { input_tokens: 20, output_tokens: 1 },
+            usage: { input_tokens: inputTokens, output_tokens: 1 },
           },
         })}\n\n`);
       }
@@ -544,7 +546,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
         }
 
         const stopReason = emittedToolCalls.length > 0 ? 'tool_use' : 'end_turn';
-        const outTokens = Math.max(1, Math.round((fullText.length + fullReasoning.length) / 2));
+        const outTokens = estimateTokens(fullText + fullReasoning);
 
         res.write(`event: message_delta\ndata: ${JSON.stringify({
           type: 'message_delta',
@@ -646,6 +648,8 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
         const hasToolUse = contentBlocks.some(b => b.type === 'tool_use');
         const stopReason = hasToolUse ? 'tool_use' : 'end_turn';
 
+        const outTokens = estimateTokens(fullText + fullReasoning);
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           id: msgId,
@@ -656,8 +660,8 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
           stop_reason: stopReason,
           stop_sequence: null,
           usage: {
-            input_tokens: 20,
-            output_tokens: Math.max(1, Math.round((fullText.length + fullReasoning.length) / 2)),
+            input_tokens: inputTokens,
+            output_tokens: outTokens,
           },
         }));
       }

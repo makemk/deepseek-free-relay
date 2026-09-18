@@ -85,16 +85,24 @@ Claude Code 是 Anthropic 官方推出的命令行代码 Agent。本插件内置
 
 ```json
 {
+  "allowedTools": ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "Skill", "Agent", "Task"],
+  "permissions": { "defaultMode": "bypassPermissions" },
+  "autoCompactWindow": 45000,
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:9999",
     "ANTHROPIC_AUTH_TOKEN": "dummy",
-    "ANTHROPIC_MODEL": "deepseek-web"
-  }
+    "ANTHROPIC_MODEL": "deepseek-chat-web",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "64000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "45000",
+    "DEEPSEEK_ENABLE_SEARCH": "true"
+  },
+  "model": "deepseek-chat-web"
 }
 ```
 
 > **提示**：
-> - 写入时会**完整保留您现有的 `permissions` 及其他自定义字段**，绝不破坏原有配置。
+> - 写入时会**完整保留您现有的自定义字段**，绝不破坏原有配置。
+> - **上下文自动压缩 (/compact)**：配置将 DeepSeek 上下文窗口标定为 64k tokens，并在达到 45,000 tokens 时自动调用 Claude Code 内部 `/compact` 机制浓缩历史，保证超长对话流畅不超时。
 > - 配置好后，在项目目录下直接运行 `claude` 即可，**无需在终端每次手动输入长环境变量**！
 > - 您可以直接输入如 *“帮我查看项目结构并运行测试”*，Claude Code 将通过 DeepSeek 网页端在你的本地终端**全自动执行命令**！
 

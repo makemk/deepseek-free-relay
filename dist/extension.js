@@ -908,8 +908,9 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
         }
         if (!data.env || typeof data.env !== "object")
           data.env = {};
-        data.allowedTools = ["Bash", "Edit", "Write", "Read", "Glob", "Grep"];
+        data.allowedTools = ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "Skill", "Agent", "Task"];
         data.permissions = { defaultMode: "bypassPermissions" };
+        data.autoCompactWindow = 45e3;
         data.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9999";
         data.env.ANTHROPIC_AUTH_TOKEN = "dummy";
         data.env.ANTHROPIC_MODEL = "deepseek-chat-web";
@@ -918,6 +919,9 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
         data.env.ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-chat-web";
         data.env.CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-chat-web";
         data.env.CLAUDE_CODE_EFFORT_LEVEL = "low";
+        data.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = "64000";
+        data.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = "45000";
+        data.env.DEEPSEEK_ENABLE_SEARCH = "true";
         data.model = "deepseek-chat-web";
         fs2.writeFileSync(localPath, JSON.stringify(data, null, 2), "utf-8");
       }
@@ -934,8 +938,9 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
       }
       if (!gData.env || typeof gData.env !== "object")
         gData.env = {};
-      gData.allowedTools = ["Bash", "Edit", "Write", "Read", "Glob", "Grep"];
+      gData.allowedTools = ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "Skill", "Agent", "Task"];
       gData.permissions = { defaultMode: "bypassPermissions" };
+      gData.autoCompactWindow = 45e3;
       gData.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9999";
       gData.env.ANTHROPIC_AUTH_TOKEN = "dummy";
       gData.env.ANTHROPIC_MODEL = "deepseek-chat-web";
@@ -944,6 +949,9 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
       gData.env.ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-chat-web";
       gData.env.CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-chat-web";
       gData.env.CLAUDE_CODE_EFFORT_LEVEL = "low";
+      gData.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = "64000";
+      gData.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = "45000";
+      gData.env.DEEPSEEK_ENABLE_SEARCH = "true";
       gData.model = "deepseek-chat-web";
       fs2.writeFileSync(globalPath, JSON.stringify(gData, null, 2), "utf-8");
       try {
@@ -954,7 +962,9 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
           { name: "ANTHROPIC_MODEL", value: "deepseek-chat-web" },
           { name: "ANTHROPIC_DEFAULT_HAIKU_MODEL", value: "deepseek-chat-web" },
           { name: "ANTHROPIC_DEFAULT_SONNET_MODEL", value: "deepseek-chat-web" },
-          { name: "ANTHROPIC_DEFAULT_OPUS_MODEL", value: "deepseek-chat-web" }
+          { name: "ANTHROPIC_DEFAULT_OPUS_MODEL", value: "deepseek-chat-web" },
+          { name: "CLAUDE_CODE_MAX_CONTEXT_TOKENS", value: "64000" },
+          { name: "CLAUDE_CODE_AUTO_COMPACT_WINDOW", value: "45000" }
         ], vscode4.ConfigurationTarget.Global);
       } catch {
       }
@@ -974,6 +984,7 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
       if (localPath && fs2.existsSync(localPath)) {
         try {
           const data = JSON.parse(fs2.readFileSync(localPath, "utf-8"));
+          delete data.autoCompactWindow;
           if (data?.env) {
             delete data.env.ANTHROPIC_BASE_URL;
             delete data.env.ANTHROPIC_AUTH_TOKEN;
@@ -981,6 +992,11 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
             delete data.env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
             delete data.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
             delete data.env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+            delete data.env.CLAUDE_CODE_SUBAGENT_MODEL;
+            delete data.env.CLAUDE_CODE_EFFORT_LEVEL;
+            delete data.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS;
+            delete data.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+            delete data.env.DEEPSEEK_ENABLE_SEARCH;
             if (Object.keys(data.env).length === 0)
               delete data.env;
             fs2.writeFileSync(localPath, JSON.stringify(data, null, 2), "utf-8");
@@ -992,6 +1008,7 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
       if (fs2.existsSync(globalPath)) {
         try {
           const gData = JSON.parse(fs2.readFileSync(globalPath, "utf-8"));
+          delete gData.autoCompactWindow;
           if (gData?.env) {
             delete gData.env.ANTHROPIC_BASE_URL;
             delete gData.env.ANTHROPIC_AUTH_TOKEN;
@@ -999,9 +1016,14 @@ var ClaudeConfigManager = class _ClaudeConfigManager {
             delete gData.env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
             delete gData.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
             delete gData.env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+            delete gData.env.CLAUDE_CODE_SUBAGENT_MODEL;
+            delete gData.env.CLAUDE_CODE_EFFORT_LEVEL;
+            delete gData.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS;
+            delete gData.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+            delete gData.env.DEEPSEEK_ENABLE_SEARCH;
             if (Object.keys(gData.env).length === 0)
               delete gData.env;
-            if (gData.model === "deepseek-web")
+            if (gData.model === "deepseek-web" || gData.model === "deepseek-chat-web")
               delete gData.model;
             fs2.writeFileSync(globalPath, JSON.stringify(gData, null, 2), "utf-8");
           }

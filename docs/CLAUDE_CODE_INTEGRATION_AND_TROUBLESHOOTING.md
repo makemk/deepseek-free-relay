@@ -14,6 +14,7 @@
    - [痛点 3: Write 工具参数校验崩溃 (`content provided as unknown`)](#3-write-工具参数校验崩溃-content-provided-as-unknown)
    - [痛点 4: Edit 工具参数缺失与嵌套引号截断](#4-edit-工具参数缺失与嵌套引号截断)
    - [痛点 5: 历史上下文膨胀与 Prefill 首字延迟优化](#5-历史上下文膨胀与-prefill-首字延迟优化)
+   - [痛点 6: 上下文窗口限制与自动压缩 (/compact) 机制调优](#6-上下文窗口限制与自动压缩-compact-机制调优)
 3. [Claude Code 工具调用协议规范速查](#三claude-code-工具调用协议规范速查)
 4. [编译打包与热部署机制](#四编译打包与热部署机制)
 5. [Claude Code 启动与环境配置最佳实践](#五claude-code-启动与环境配置最佳实践)
@@ -248,6 +249,42 @@ SubagentHandback
 
 ---
 
+### 6. 上下文窗口限制与自动压缩 (/compact) 机制调优
+
+#### 【故障现象】
+在进行多轮复杂编程或长任务（包含多次文件读取和终端命令输出）后：
+1. Claude Code 运行 `/context` 命令时，始终显示：
+   ```text
+   Context: 20 / 1,000,000 tokens (0.0%)
+   ```
+2. Claude Code 从未自动触发上下文压缩（Auto-Compaction），长会话不断膨胀，最终导致网页端请求首字延迟急剧升高，甚至触发网页端单次提交字符超限而报错。
+
+#### 【底层根因】
+1. **DeepSeek 网页端上下文容量上限**：
+   - DeepSeek-V3 / DeepSeek-R1 原生模型架构总上下文为 **64,000 tokens (64k)**。
+   - 网页端（chat.deepseek.com）单次请求建议控制在 20,000 ~ 30,000 字符内，总对话历史通过 `chat_session_id` 维持。当整场多轮会话回灌超过 45,000 tokens 时，TTFT 显著增加。
+2. **Claude Code 自动压缩判定机理 (逆向 `claude.exe`)**：
+   - Claude Code 内部通过监听 Anthropic API 响应中的 `usage.input_tokens` 累计统计上下文占用：
+     $$\text{usedPct} = \frac{\text{input\_tokens}}{\text{contextWindow}} \times 100\%$$
+   - 读取环境变量 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 确定总窗口，读取配置 `autoCompactWindow` 或 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 确定压缩门限。当 `Ne > autoCompactWindow` 时，自动触发：
+     `[inProcessRunner] ... compacting history (${Ne} tokens)`。
+   - **历史致命缺陷**：代理服务在 `anthropicHandler.ts` 中硬编码了 `usage: { input_tokens: 20 }`，导致 Claude Code 误判上下文消耗永远为 20 tokens (0.03%)，彻底蒙蔽了自动压缩触发器！
+
+#### 【解决方案】
+1. **动态精准 Token 估算器 (`estimateTokens`)**：
+   代理层实现针对中英文与代码混排的高精度估算：
+   - 中文汉字与全角字符：约 1.0 token / 字符；
+   - 英文单词、代码标点、空白符号：约 1 token / 3.5 字符；
+   在 `message_start` 及非流式响应中将实际完整提示词的 Token 数动态上报至 `usage.input_tokens`，将模型输出文本动态上报至 `usage.output_tokens`。
+2. **科学标定窗口与压缩门限**：
+   在 `.claude/settings.local.json` 与 `~/.claude/settings.json` 中配置：
+   - `"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "64000"`（匹配 DeepSeek-V3/R1 真实 64k 架构）
+   - `"autoCompactWindow": 45000` 与 `"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "45000"`（在达到 70% 上限时提前平滑压缩）
+3. **全自动闭环效果**：
+   当对话历史增长至 45,000 tokens 时，Claude Code 自动向代理发起精炼总结请求，将数万 Token 的冗长工具调用与执行反馈无缝浓缩为精炼摘要记忆，无需人工干预即可让长会话永久持续运行！
+
+---
+
 ## 三、Claude Code 工具调用协议规范速查
 
 Claude Code 官方运行时原生支持的标准工具 Schema 如下：
@@ -391,15 +428,49 @@ Invoke-RestMethod -Uri "http://127.0.0.1:9999/health"
 }
 ```
 
-### 2. 启动 Claude Code 环境变量建议
-通过 PowerShell 配置终端环境变量直连本地代理服务：
-```powershell
-$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:9999"
-$env:ANTHROPIC_API_KEY = "deepseek-web-proxy-token"
-
-# 推荐带 --dangerously-skip-permissions 或 --auto 启动享受全自动 Agent 编码
-claude --auto
+### 2. 项目级配置文件推荐 (.claude/settings.local.json)
+推荐直接使用 VS Code 插件一键开启，或在项目根目录下创建 `.claude/settings.local.json`：
+```json
+{
+  "allowedTools": [
+    "Bash",
+    "Edit",
+    "Write",
+    "Read",
+    "Glob",
+    "Grep",
+    "Skill",
+    "Agent",
+    "Task"
+  ],
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "autoCompactWindow": 45000,
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "dummy",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:9999",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-chat-web",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-chat-web",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-chat-web",
+    "ANTHROPIC_MODEL": "deepseek-chat-web",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-chat-web",
+    "CLAUDE_CODE_EFFORT_LEVEL": "low",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "64000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "45000",
+    "DEEPSEEK_ENABLE_SEARCH": "true"
+  },
+  "model": "deepseek-chat-web"
+}
 ```
+
+### 3. 终端启动 Claude Code
+配置好后，无需在终端输入长环境变量，直接运行：
+```powershell
+claude
+```
+- 可以随时在交互中输入 `/context` 查看真实上下文 Token 占用（基于 64,000 上限）。
+- 当 Token 达到 45,000 时，Claude Code 将自动调用后台压缩；您也可以随时在终端输入 `/compact` 主动压缩历史上下文！
 
 ---
 *文档归档于：`c:\Users\J03378\Documents\vscode_env\vscode-deepseek-web\docs\CLAUDE_CODE_INTEGRATION_AND_TROUBLESHOOTING.md`*

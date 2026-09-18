@@ -1772,6 +1772,16 @@ var PacingManager = class _PacingManager {
   }
 };
 
+// src/proxy/agent/tokenEstimator.ts
+function estimateTokens(text) {
+  if (!text || typeof text !== "string")
+    return 0;
+  const cjkMatches = text.match(/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/g);
+  const cjkCount = cjkMatches ? cjkMatches.length : 0;
+  const nonCjkCount = text.length - cjkCount;
+  return Math.max(1, Math.ceil(cjkCount * 1 + nonCjkCount / 3.5));
+}
+
 // src/proxy/protocols/anthropicHandler.ts
 function sendError(res, status, errType, message) {
   if (!res.headersSent) {
@@ -1994,6 +2004,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
     return;
   }
   const prompt = PromptInjector.formatAnthropicToPrompt(payload.system, payload.messages, payload.tools);
+  const inputTokens = estimateTokens(prompt);
   const modelStr = (payload.model || "").toLowerCase();
   const isReasoner = (modelStr.includes("reasoner") || modelStr.includes("r1") || modelStr === "deepseek-web") && !modelStr.includes("chat") && !modelStr.includes("fast");
   const stream = !!payload.stream;
@@ -2088,7 +2099,7 @@ data: ${JSON.stringify({
             content: [],
             stop_reason: null,
             stop_sequence: null,
-            usage: { input_tokens: 20, output_tokens: 1 }
+            usage: { input_tokens: inputTokens, output_tokens: 1 }
           }
         })}
 
@@ -2338,7 +2349,7 @@ data: ${JSON.stringify({
 `);
         }
         const stopReason = emittedToolCalls.length > 0 ? "tool_use" : "end_turn";
-        const outTokens = Math.max(1, Math.round((fullText.length + fullReasoning.length) / 2));
+        const outTokens = estimateTokens(fullText + fullReasoning);
         res.write(`event: message_delta
 data: ${JSON.stringify({
           type: "message_delta",
@@ -2439,6 +2450,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
         }
         const hasToolUse = contentBlocks.some((b) => b.type === "tool_use");
         const stopReason = hasToolUse ? "tool_use" : "end_turn";
+        const outTokens = estimateTokens(fullText + fullReasoning);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           id: msgId,
@@ -2449,8 +2461,8 @@ data: ${JSON.stringify({ type: "message_stop" })}
           stop_reason: stopReason,
           stop_sequence: null,
           usage: {
-            input_tokens: 20,
-            output_tokens: Math.max(1, Math.round((fullText.length + fullReasoning.length) / 2))
+            input_tokens: inputTokens,
+            output_tokens: outTokens
           }
         }));
       }
@@ -2530,6 +2542,7 @@ async function handleOpenAiChatCompletions(req, res, rawBody) {
   }
   const tools = (payload.tools || []).map((t) => t.function || t);
   const prompt = PromptInjector.formatOpenAiMessagesToPrompt(payload.messages, tools);
+  const inputTokens = estimateTokens(prompt);
   const modelStr = (payload.model || "").toLowerCase();
   const isReasoner = (modelStr.includes("reasoner") || modelStr.includes("r1") || modelStr === "deepseek-web") && !modelStr.includes("chat") && !modelStr.includes("fast");
   const stream = !!payload.stream;
@@ -2737,6 +2750,7 @@ async function handleOpenAiChatCompletions(req, res, rawBody) {
             }
           }));
         }
+        const outTokens = estimateTokens(fullText + fullReasoning);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           id: chatId,
@@ -2747,7 +2761,12 @@ async function handleOpenAiChatCompletions(req, res, rawBody) {
             index: 0,
             message: messageObj,
             finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop"
-          }]
+          }],
+          usage: {
+            prompt_tokens: inputTokens,
+            completion_tokens: outTokens,
+            total_tokens: inputTokens + outTokens
+          }
         }));
       }
     } catch (err) {

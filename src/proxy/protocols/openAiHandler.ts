@@ -9,6 +9,7 @@ import { PowPoolManager } from '../pow/powPoolManager';
 import { PacingManager } from '../security/pacingManager';
 import { CircuitBreaker } from '../security/circuitBreaker';
 import { buildRealisticHeaders } from '../security/fingerprint';
+import { estimateTokens } from '../agent/tokenEstimator';
 
 function sendError(res: http.ServerResponse, status: number, errType: string, message: string) {
   if (!res.headersSent) {
@@ -61,6 +62,7 @@ export async function handleOpenAiChatCompletions(req: http.IncomingMessage, res
 
   const tools: ToolDefinition[] = (payload.tools || []).map(t => t.function || t);
   const prompt = PromptInjector.formatOpenAiMessagesToPrompt(payload.messages, tools);
+  const inputTokens = estimateTokens(prompt);
   const modelStr = (payload.model || '').toLowerCase();
   const isReasoner = (modelStr.includes('reasoner') || modelStr.includes('r1') || modelStr === 'deepseek-web') && !modelStr.includes('chat') && !modelStr.includes('fast');
   const stream = !!payload.stream;
@@ -274,6 +276,8 @@ export async function handleOpenAiChatCompletions(req: http.IncomingMessage, res
           }));
         }
 
+        const outTokens = estimateTokens(fullText + fullReasoning);
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           id: chatId,
@@ -285,6 +289,11 @@ export async function handleOpenAiChatCompletions(req: http.IncomingMessage, res
             message: messageObj,
             finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
           }],
+          usage: {
+            prompt_tokens: inputTokens,
+            completion_tokens: outTokens,
+            total_tokens: inputTokens + outTokens,
+          },
         }));
       }
     } catch (err: any) {
