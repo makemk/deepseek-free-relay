@@ -146,5 +146,5 @@ npm run compile
 npx @vscode/vsce package --no-dependencies
 
 # 3. 安装/更新到当前 VS Code
-code --install-extension deepseek-free-relay-1.1.0.vsix --force
+code --install-extension deepseek-free-relay-1.2.0.vsix --force
 ```

@@ -2,7 +2,7 @@
   "name": "deepseek-free-relay",
   "displayName": "DeepSeek Free Relay (网页版桥接)",
   "description": "在 VS Code 与 Claude Code 中直接接入 DeepSeek 网页版（支持深度思考 / 极速对话 / 全网搜索 / 工具调用），免 API 充值与额度消耗，提供代码解释、重构与自动更新支持。",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "makemk",
   "repository": {
     "type": "git",

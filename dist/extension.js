@@ -1066,7 +1066,7 @@ var UpdateManager = class _UpdateManager {
   currentVersion;
   constructor(context) {
     this.context = context;
-    this.currentVersion = context.extension?.packageJSON?.version || "1.1.0";
+    this.currentVersion = context.extension?.packageJSON?.version || "1.2.0";
   }
   static getInstance(context) {
     if (!_UpdateManager.instance && context) {
@@ -1166,7 +1166,7 @@ var UpdateManager = class _UpdateManager {
     const rawUrl = this.getUpdateUrl();
     const endpoint = this.normalizeUpdateUrl(rawUrl);
     const headers = {
-      "User-Agent": "VSCode-DeepSeek-Web-Updater/1.1.0 (VSCode Extension)",
+      "User-Agent": "VSCode-DeepSeek-Web-Updater/1.2.0 (VSCode Extension)",
       "Accept": "application/vnd.github.v3+json, application/json;q=0.9, */*;q=0.8"
     };
     const controller = new AbortController();

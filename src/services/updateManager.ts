@@ -22,7 +22,7 @@ export class UpdateManager {
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
-    this.currentVersion = context.extension?.packageJSON?.version || '1.1.0';
+    this.currentVersion = context.extension?.packageJSON?.version || '1.2.0';
   }
 
   public static getInstance(context?: vscode.ExtensionContext): UpdateManager {
@@ -136,7 +136,7 @@ export class UpdateManager {
     const endpoint = this.normalizeUpdateUrl(rawUrl);
 
     const headers: Record<string, string> = {
-      'User-Agent': 'VSCode-DeepSeek-Web-Updater/1.1.0 (VSCode Extension)',
+      'User-Agent': 'VSCode-DeepSeek-Web-Updater/1.2.0 (VSCode Extension)',
       'Accept': 'application/vnd.github.v3+json, application/json;q=0.9, */*;q=0.8',
     };
 
