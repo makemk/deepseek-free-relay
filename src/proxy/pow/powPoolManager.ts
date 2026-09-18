@@ -108,6 +108,7 @@ export class PowPoolManager {
       method: 'POST',
       headers: buildRealisticHeaders(token),
       body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
+      signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.POW_CHALLENGE_MS),
     });
 
     if (!powRes.ok) {

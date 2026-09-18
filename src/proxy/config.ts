@@ -36,7 +36,15 @@ export const PROXY_CONFIG = {
   // 会话复用配置
   SESSION_REUSE: {
     MAX_AGE_MS: 15 * 60 * 1000,  // 单会话最大存活 15 分钟
-    MAX_TURNS: 25,               // 单会话最大交互轮数
+    MAX_TURNS: 8,                // 单会话最大交互轮数 (由25降至8，防止服务端消息树膨胀爆炸)
+    MAX_PROMPT_CHARS: 24000,     // 提示词字符超 2.4 万时自动强制开辟全新会话
+  },
+
+  // 网络强超时控制 (杜绝长连接无响应无限挂起假死)
+  TIMEOUTS: {
+    UPSTREAM_COMPLETION_MS: 45000, // completion 流式建立强超时 45 秒
+    POW_CHALLENGE_MS: 15000,       // PoW 挑战拉取超时 15 秒
+    SESSION_CREATE_MS: 15000,      // 创建远端会话超时 15 秒
   },
 };
 

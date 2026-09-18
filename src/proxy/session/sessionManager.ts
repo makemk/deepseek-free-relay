@@ -44,7 +44,7 @@ export class SessionManager {
   /**
    * 检查指定活跃会话是否仍可复用
    */
-  public canReuseSession(session: ActiveSession | undefined, messages: any[]): boolean {
+  public canReuseSession(session: ActiveSession | undefined, messages: any[], promptChars: number = 0): boolean {
     if (!session) return false;
 
     // 0. 并发防撞锁：若当前会话正在处于流式传输处理中 (inFlight)，严禁并发重入复用！
@@ -58,12 +58,17 @@ export class SessionManager {
       return false;
     }
 
-    // 2. 检查轮数上限
+    // 2. 检查轮数上限 (默认 8 轮，防止消息树过度深层嵌套)
     if (session.turnCount >= PROXY_CONFIG.SESSION_REUSE.MAX_TURNS) {
       return false;
     }
 
-    // 3. 检查任务指纹
+    // 3. 检查单次提示词过大安全线 (若整包 prompt > 24000 字符，不复用旧会话树，强制新开全新会话防止服务端重叠爆炸)
+    if (promptChars > (PROXY_CONFIG.SESSION_REUSE.MAX_PROMPT_CHARS || 24000)) {
+      return false;
+    }
+
+    // 4. 检查任务指纹
     const sig = this.getFirstMessageSignature(messages);
     return sig === session.firstMessageSignature;
   }
@@ -87,7 +92,8 @@ export class SessionManager {
     token: string,
     messages: any[],
     forceNew: boolean = false,
-    channel: string = 'main'
+    channel: string = 'main',
+    promptChars: number = 0
   ): Promise<{ sessionId: string; parentMessageId: string | null; isNew: boolean; sessionKey: string }> {
     CircuitBreaker.getInstance().checkPass();
     this.cleanExpiredSessions();
@@ -99,7 +105,7 @@ export class SessionManager {
     const existingSession = this.sessions.get(sessionKey);
 
     // 如果可以复用
-    if (!forceNew && this.canReuseSession(existingSession, messages) && existingSession) {
+    if (!forceNew && this.canReuseSession(existingSession, messages, promptChars) && existingSession) {
       existingSession.inFlight = true;
       existingSession.turnCount++;
       existingSession.lastActiveAt = Date.now();
@@ -112,12 +118,13 @@ export class SessionManager {
       };
     }
 
-    // 否则新建远端会话
+    // 否则新建远端会话 (带超时控制)
     const headers = buildRealisticHeaders(token);
     const res = await fetch(`${PROXY_CONFIG.DEEPSEEK_WEB_ORIGIN}/api/v0/chat_session/create`, {
       method: 'POST',
       headers,
       body: JSON.stringify({}),
+      signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.SESSION_CREATE_MS),
     });
 
     if (res.status === 401) {
@@ -185,10 +192,10 @@ export class SessionManager {
    * 作废会话
    */
   public invalidateCurrentSession(sessionKey?: string): void {
-    if (sessionKey) {
-      this.sessions.delete(sessionKey);
-    } else {
-      this.sessions.delete(this.lastUsedSessionKey);
+    const key = sessionKey || this.lastUsedSessionKey;
+    if (this.sessions.has(key)) {
+      console.log(`[SessionManager] 🗑️ 及时作废坏会话: ${key}，下轮将自动开启全新纯净会话`);
+      this.sessions.delete(key);
     }
   }
 }

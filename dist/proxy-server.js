@@ -97,8 +97,19 @@ var PROXY_CONFIG = {
   SESSION_REUSE: {
     MAX_AGE_MS: 15 * 60 * 1e3,
     // 单会话最大存活 15 分钟
-    MAX_TURNS: 25
-    // 单会话最大交互轮数
+    MAX_TURNS: 8,
+    // 单会话最大交互轮数 (由25降至8，防止服务端消息树膨胀爆炸)
+    MAX_PROMPT_CHARS: 24e3
+    // 提示词字符超 2.4 万时自动强制开辟全新会话
+  },
+  // 网络强超时控制 (杜绝长连接无响应无限挂起假死)
+  TIMEOUTS: {
+    UPSTREAM_COMPLETION_MS: 45e3,
+    // completion 流式建立强超时 45 秒
+    POW_CHALLENGE_MS: 15e3,
+    // PoW 挑战拉取超时 15 秒
+    SESSION_CREATE_MS: 15e3
+    // 创建远端会话超时 15 秒
   }
 };
 function resolveWasmPath() {
@@ -1409,7 +1420,7 @@ var SessionManager = class _SessionManager {
   /**
    * 检查指定活跃会话是否仍可复用
    */
-  canReuseSession(session, messages) {
+  canReuseSession(session, messages, promptChars = 0) {
     if (!session)
       return false;
     if (session.inFlight) {
@@ -1420,6 +1431,9 @@ var SessionManager = class _SessionManager {
       return false;
     }
     if (session.turnCount >= PROXY_CONFIG.SESSION_REUSE.MAX_TURNS) {
+      return false;
+    }
+    if (promptChars > (PROXY_CONFIG.SESSION_REUSE.MAX_PROMPT_CHARS || 24e3)) {
       return false;
     }
     const sig = this.getFirstMessageSignature(messages);
@@ -1439,14 +1453,14 @@ var SessionManager = class _SessionManager {
   /**
    * 获取或创建远端会话 (支持 channel 隔离：主智能体 'main' 与子智能体 'subagent')
    */
-  async getOrCreateSession(token, messages, forceNew = false, channel = "main") {
+  async getOrCreateSession(token, messages, forceNew = false, channel = "main", promptChars = 0) {
     CircuitBreaker.getInstance().checkPass();
     this.cleanExpiredSessions();
     const sig = this.getFirstMessageSignature(messages);
     const sessionKey = `${channel}_${sig}`;
     this.lastUsedSessionKey = sessionKey;
     const existingSession = this.sessions.get(sessionKey);
-    if (!forceNew && this.canReuseSession(existingSession, messages) && existingSession) {
+    if (!forceNew && this.canReuseSession(existingSession, messages, promptChars) && existingSession) {
       existingSession.inFlight = true;
       existingSession.turnCount++;
       existingSession.lastActiveAt = Date.now();
@@ -1462,7 +1476,8 @@ var SessionManager = class _SessionManager {
     const res = await fetch(`${PROXY_CONFIG.DEEPSEEK_WEB_ORIGIN}/api/v0/chat_session/create`, {
       method: "POST",
       headers,
-      body: JSON.stringify({})
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.SESSION_CREATE_MS)
     });
     if (res.status === 401) {
       throw new Error("TOKEN_EXPIRED");
@@ -1521,10 +1536,10 @@ var SessionManager = class _SessionManager {
    * 作废会话
    */
   invalidateCurrentSession(sessionKey) {
-    if (sessionKey) {
-      this.sessions.delete(sessionKey);
-    } else {
-      this.sessions.delete(this.lastUsedSessionKey);
+    const key = sessionKey || this.lastUsedSessionKey;
+    if (this.sessions.has(key)) {
+      console.log(`[SessionManager] \u{1F5D1}\uFE0F \u53CA\u65F6\u4F5C\u5E9F\u574F\u4F1A\u8BDD: ${key}\uFF0C\u4E0B\u8F6E\u5C06\u81EA\u52A8\u5F00\u542F\u5168\u65B0\u7EAF\u51C0\u4F1A\u8BDD`);
+      this.sessions.delete(key);
     }
   }
 };
@@ -1670,7 +1685,8 @@ var PowPoolManager = class _PowPoolManager {
     const powRes = await fetch(`${PROXY_CONFIG.DEEPSEEK_WEB_ORIGIN}/api/v0/chat/create_pow_challenge`, {
       method: "POST",
       headers: buildRealisticHeaders(token),
-      body: JSON.stringify({ target_path: "/api/v0/chat/completion" })
+      body: JSON.stringify({ target_path: "/api/v0/chat/completion" }),
+      signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.POW_CHALLENGE_MS)
     });
     if (!powRes.ok) {
       if (powRes.status === 429 || powRes.status === 403) {
@@ -2020,7 +2036,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
     const channel = isSubagent ? "subagent" : "main";
     let sessionInfo;
     try {
-      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages, false, channel);
+      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages, false, channel, prompt.length);
     } catch (err) {
       if (err.message === "TOKEN_EXPIRED") {
         sendError(res, 401, "authentication_error", "DeepSeek \u7F51\u9875\u7AEF\u51ED\u636E (userToken) \u5DF2\u5931\u6548\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u91CD\u65B0\u767B\u5F55\u5E76\u66F4\u65B0 Token\u3002");
@@ -2064,16 +2080,21 @@ data: ${JSON.stringify({ type: "message_stop" })}
             search_enabled: isSearchEnabled,
             action: null,
             preempt: false
-          })
+          }),
+          signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.UPSTREAM_COMPLETION_MS)
         });
       } catch (err) {
-        sendError(res, 502, "api_error", `\u8FDE\u63A5 DeepSeek \u7F51\u9875\u7AEF\u5931\u8D25: ${err.message}`);
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+        const isTimeout = err.name === "TimeoutError" || err.message?.includes("timeout") || err.message?.includes("aborted");
+        const errMsg = isTimeout ? "DeepSeek \u7F51\u9875\u7AEF\u54CD\u5E94\u8D85\u65F6 (45s)\uFF0C\u5DF2\u81EA\u52A8\u6E05\u7406\u4F1A\u8BDD\u91CD\u8BD5" : `\u8FDE\u63A5 DeepSeek \u7F51\u9875\u7AEF\u5931\u8D25: ${err.message}`;
+        sendError(res, 502, "api_error", errMsg);
         return;
       }
       if (!dsRes.ok || !dsRes.body) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
         if (dsRes.status === 429 || dsRes.status === 403) {
           CircuitBreaker.getInstance().trip(`\u8C03\u7528 completion \u9636\u6BB5\u89E6\u53D1 HTTP ${dsRes.status}`);
-          sendError(res, 429, "rate_limit_error", "\u89E6\u53D1\u4E86\u7F51\u9875\u7AEF\u4EBA\u673A\u6ED1\u5757\uFF0C\u5DF2\u542F\u52A8\u7194\u65AD\u4FDD\u62A4\u3002");
+          sendError(res, 429, "rate_limit_error", "\u89E6\u53D1\u4E86\u7F51\u9875\u7AEF\u4EBA\u673A\u6ED1\u5757\uFF0C\u5DF2\u542F\u52A8\u7194\u65AD\u4FDD\u62A4\u3002\u8BF7\u5728\u6D4F\u89C8\u5668\u6253\u5F00 chat.deepseek.com \u5B8C\u6210\u6ED1\u5757\u9A8C\u8BC1\u3002");
           return;
         }
         sendError(res, dsRes.status, "api_error", `DeepSeek \u7F51\u9875\u7AEF\u54CD\u5E94\u5F02\u5E38 HTTP ${dsRes.status}`);
@@ -2322,7 +2343,8 @@ data: ${JSON.stringify({ type: "content_block_stop", index: streamBlockIndex })}
           }
         }
         if (streamBlockIndex === -1 && emittedToolCalls.length === 0) {
-          const fallbackText = fullReasoning.trim() || " ";
+          SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+          const fallbackText = fullReasoning.trim() || "\uFF08\u670D\u52A1\u8FDE\u63A5\u5DF2\u6062\u590D\u5C31\u7EEA\uFF0C\u8BF7\u7EE7\u7EED\u53D1\u9001\u60A8\u7684\u6307\u4EE4\uFF09";
           streamBlockIndex++;
           res.write(`event: content_block_start
 data: ${JSON.stringify({
@@ -2468,6 +2490,9 @@ data: ${JSON.stringify({ type: "message_stop" })}
       }
     } catch (streamErr) {
       console.error("[Claude Code Agent] \u274C \u8BF7\u6C42\u5904\u7406\u5F02\u5E38:", streamErr);
+      if (sessionInfo?.sessionKey) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+      }
       if (!res.headersSent) {
         sendError(res, 502, "api_error", `\u8BF7\u6C42\u5904\u7406\u5931\u8D25: ${streamErr.message}`);
       } else if (stream && !res.writableEnded) {
@@ -2551,7 +2576,7 @@ async function handleOpenAiChatCompletions(req, res, rawBody) {
   await PacingManager.getInstance().schedule(async () => {
     let sessionInfo;
     try {
-      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages);
+      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages, false, "openai", prompt.length);
     } catch (err) {
       if (err.message === "TOKEN_EXPIRED") {
         sendError2(res, 401, "authentication_error", "DeepSeek \u7F51\u9875\u7AEF\u51ED\u636E (userToken) \u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u914D\u7F6E\u3002");
@@ -2595,16 +2620,21 @@ async function handleOpenAiChatCompletions(req, res, rawBody) {
             search_enabled: isSearchEnabled,
             action: null,
             preempt: false
-          })
+          }),
+          signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.UPSTREAM_COMPLETION_MS)
         });
       } catch (err) {
-        sendError2(res, 502, "api_error", `\u8FDE\u63A5 DeepSeek \u7F51\u9875\u7AEF\u5931\u8D25: ${err.message}`);
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+        const isTimeout = err.name === "TimeoutError" || err.message?.includes("timeout") || err.message?.includes("aborted");
+        const errMsg = isTimeout ? "DeepSeek \u7F51\u9875\u7AEF\u54CD\u5E94\u8D85\u65F6 (45s)\uFF0C\u5DF2\u81EA\u52A8\u6E05\u7406\u4F1A\u8BDD\u91CD\u8BD5" : `\u8FDE\u63A5 DeepSeek \u7F51\u9875\u7AEF\u5931\u8D25: ${err.message}`;
+        sendError2(res, 502, "api_error", errMsg);
         return;
       }
       if (!dsRes.ok || !dsRes.body) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
         if (dsRes.status === 429 || dsRes.status === 403) {
           CircuitBreaker.getInstance().trip(`\u8C03\u7528 completion \u9636\u6BB5\u89E6\u53D1 HTTP ${dsRes.status}`);
-          sendError2(res, 429, "rate_limit_error", "\u89E6\u53D1\u4E86\u7F51\u9875\u7AEF\u4EBA\u673A\u9650\u5236\uFF0C\u5DF2\u542F\u52A8\u7194\u65AD\u4FDD\u62A4\u3002");
+          sendError2(res, 429, "rate_limit_error", "\u89E6\u53D1\u4E86\u7F51\u9875\u7AEF\u4EBA\u673A\u9650\u5236\uFF0C\u5DF2\u542F\u52A8\u7194\u65AD\u4FDD\u62A4\u3002\u8BF7\u5728\u6D4F\u89C8\u5668\u4E2D\u5B8C\u6210\u6ED1\u5757\u9A8C\u8BC1\u3002");
           return;
         }
         sendError2(res, dsRes.status, "api_error", `DeepSeek \u7F51\u9875\u7AEF\u54CD\u5E94\u5F02\u5E38 HTTP ${dsRes.status}`);
@@ -2771,6 +2801,9 @@ async function handleOpenAiChatCompletions(req, res, rawBody) {
       }
     } catch (err) {
       console.error("[OpenAI Handler] \u274C \u8BF7\u6C42\u5904\u7406\u5F02\u5E38:", err);
+      if (sessionInfo?.sessionKey) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+      }
       if (!res.headersSent) {
         sendError2(res, 502, "api_error", `\u8BF7\u6C42\u5904\u7406\u5931\u8D25: ${err.message}`);
       }

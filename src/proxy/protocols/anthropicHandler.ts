@@ -236,7 +236,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
     const channel = isSubagent ? 'subagent' : 'main';
     let sessionInfo: { sessionId: string; parentMessageId: string | null; isNew: boolean; sessionKey: string };
     try {
-      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages, false, channel);
+      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages, false, channel, prompt.length);
     } catch (err: any) {
       if (err.message === 'TOKEN_EXPIRED') {
         sendError(res, 401, 'authentication_error', 'DeepSeek 网页端凭据 (userToken) 已失效，请在浏览器重新登录并更新 Token。');
@@ -264,7 +264,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
         return;
       }
 
-      // 6. 发起上游流式请求 (纯正 Chrome 132 官方指纹头，杜绝任何可疑伪造标记)
+      // 6. 发起上游流式请求 (纯正 Chrome 132 官方指纹头，带 45s 强超时保护)
       const headers = {
         ...buildRealisticHeaders(token),
         'X-DS-PoW-Response': powHeader,
@@ -286,16 +286,21 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
             action: null,
             preempt: false,
           }),
+          signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.UPSTREAM_COMPLETION_MS),
         });
       } catch (err: any) {
-        sendError(res, 502, 'api_error', `连接 DeepSeek 网页端失败: ${err.message}`);
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+        const isTimeout = err.name === 'TimeoutError' || err.message?.includes('timeout') || err.message?.includes('aborted');
+        const errMsg = isTimeout ? 'DeepSeek 网页端响应超时 (45s)，已自动清理会话重试' : `连接 DeepSeek 网页端失败: ${err.message}`;
+        sendError(res, 502, 'api_error', errMsg);
         return;
       }
 
       if (!dsRes.ok || !dsRes.body) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
         if (dsRes.status === 429 || dsRes.status === 403) {
           CircuitBreaker.getInstance().trip(`调用 completion 阶段触发 HTTP ${dsRes.status}`);
-          sendError(res, 429, 'rate_limit_error', '触发了网页端人机滑块，已启动熔断保护。');
+          sendError(res, 429, 'rate_limit_error', '触发了网页端人机滑块，已启动熔断保护。请在浏览器打开 chat.deepseek.com 完成滑块验证。');
           return;
         }
         sendError(res, dsRes.status, 'api_error', `DeepSeek 网页端响应异常 HTTP ${dsRes.status}`);
@@ -525,9 +530,10 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
           }
         }
 
-        // 空内容强力防死锁兜底：若当前没有任何内容块被输出，强制补发一个有效文本块，彻底根除 Claude Code 空内容反复重试与卡死
+        // 空内容强力防死锁兜底：若当前没有任何内容块被输出，自动作废故障会话，补发清晰状态提示
         if (streamBlockIndex === -1 && emittedToolCalls.length === 0) {
-          const fallbackText = fullReasoning.trim() || ' ';
+          SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+          const fallbackText = fullReasoning.trim() || '（服务连接已恢复就绪，请继续发送您的指令）';
           streamBlockIndex++;
           res.write(`event: content_block_start\ndata: ${JSON.stringify({
             type: 'content_block_start',
@@ -667,6 +673,9 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
       }
     } catch (streamErr: any) {
       console.error('[Claude Code Agent] ❌ 请求处理异常:', streamErr);
+      if (sessionInfo?.sessionKey) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+      }
       if (!res.headersSent) {
         sendError(res, 502, 'api_error', `请求处理失败: ${streamErr.message}`);
       } else if (stream && !res.writableEnded) {

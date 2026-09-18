@@ -74,7 +74,7 @@ export async function handleOpenAiChatCompletions(req: http.IncomingMessage, res
   await PacingManager.getInstance().schedule(async () => {
     let sessionInfo: { sessionId: string; parentMessageId: string | null; isNew: boolean; sessionKey: string };
     try {
-      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages);
+      sessionInfo = await SessionManager.getInstance().getOrCreateSession(token, payload.messages, false, 'openai', prompt.length);
     } catch (err: any) {
       if (err.message === 'TOKEN_EXPIRED') {
         sendError(res, 401, 'authentication_error', 'DeepSeek 网页端凭据 (userToken) 已失效，请重新配置。');
@@ -124,16 +124,21 @@ export async function handleOpenAiChatCompletions(req: http.IncomingMessage, res
             action: null,
             preempt: false,
           }),
+          signal: AbortSignal.timeout(PROXY_CONFIG.TIMEOUTS.UPSTREAM_COMPLETION_MS),
         });
       } catch (err: any) {
-        sendError(res, 502, 'api_error', `连接 DeepSeek 网页端失败: ${err.message}`);
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+        const isTimeout = err.name === 'TimeoutError' || err.message?.includes('timeout') || err.message?.includes('aborted');
+        const errMsg = isTimeout ? 'DeepSeek 网页端响应超时 (45s)，已自动清理会话重试' : `连接 DeepSeek 网页端失败: ${err.message}`;
+        sendError(res, 502, 'api_error', errMsg);
         return;
       }
 
       if (!dsRes.ok || !dsRes.body) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
         if (dsRes.status === 429 || dsRes.status === 403) {
           CircuitBreaker.getInstance().trip(`调用 completion 阶段触发 HTTP ${dsRes.status}`);
-          sendError(res, 429, 'rate_limit_error', '触发了网页端人机限制，已启动熔断保护。');
+          sendError(res, 429, 'rate_limit_error', '触发了网页端人机限制，已启动熔断保护。请在浏览器中完成滑块验证。');
           return;
         }
         sendError(res, dsRes.status, 'api_error', `DeepSeek 网页端响应异常 HTTP ${dsRes.status}`);
@@ -298,6 +303,9 @@ export async function handleOpenAiChatCompletions(req: http.IncomingMessage, res
       }
     } catch (err: any) {
       console.error('[OpenAI Handler] ❌ 请求处理异常:', err);
+      if (sessionInfo?.sessionKey) {
+        SessionManager.getInstance().invalidateCurrentSession(sessionInfo.sessionKey);
+      }
       if (!res.headersSent) {
         sendError(res, 502, 'api_error', `请求处理失败: ${err.message}`);
       }
