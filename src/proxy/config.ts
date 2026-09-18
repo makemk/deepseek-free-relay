@@ -155,7 +155,7 @@ export function resolveSearchEnabled(
     }
   } catch {}
 
-  // 5. 提示词动态意图识别 (当提问明确包含联网、搜索、查最新资讯时自动激活)
+  // 5. 提示词动态意图识别 (若明确包含搜索意图则必定开启)
   if (prompt && typeof prompt === 'string') {
     const searchIntentRegex = /(?:联网搜索|全网搜索|网上搜|搜索一下|搜一下|查一下最新的|搜索最新|最新发布|实时天气|实时资讯|实时新闻|search\s+online|search\s+the\s+web|web\s+search)/i;
     if (searchIntentRegex.test(prompt)) {
@@ -163,5 +163,8 @@ export function resolveSearchEnabled(
     }
   }
 
-  return false;
+  // 6. 默认启用原生全网实时搜索 (DeepSeek Web 服务端原生支持按需智能联网：
+  // 开启时，模型遇到最新外部信息或文档会智能触发云端检索；若不需要则直出答案。
+  // 绝不能默认关闭，否则模型会丧失联网能力并在终端滥用 curl 抓取网页引发假死)
+  return true;
 }

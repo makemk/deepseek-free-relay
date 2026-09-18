@@ -133,7 +133,7 @@ var TokenStorage = class {
   }
   isSearchEnabled() {
     const config = vscode.workspace.getConfiguration("deepseek");
-    return config.get("searchEnabled", false);
+    return config.get("searchEnabled", true);
   }
   async setSearchEnabled(enabled) {
     const config = vscode.workspace.getConfiguration("deepseek");

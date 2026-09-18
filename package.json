@@ -207,7 +207,7 @@
         },
         "deepseek.searchEnabled": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "是否开启网页版联网搜索功能"
         },
         "deepseek.autoStartProxy": {
