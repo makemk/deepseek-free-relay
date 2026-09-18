@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="dsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="50%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#06B6D4" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#1E1E2E" />
+  <!-- DeepSeek Whale Silhouette / Wave -->
+  <path d="M28 72 C 28 45, 60 32, 90 44 C 102 49, 108 58, 106 68 C 104 78, 92 84, 82 82 C 72 80, 68 86, 60 90 C 50 95, 38 92, 32 84 C 29 80, 28 76, 28 72 Z" fill="url(#dsGrad)" />
+  <!-- Eye -->
+  <circle cx="86" cy="56" r="4" fill="#FFFFFF" />
+  <!-- Water spout / sparks -->
+  <circle cx="70" cy="28" r="3" fill="#60A5FA" />
+  <circle cx="80" cy="22" r="4" fill="#38BDF8" />
+  <circle cx="92" cy="26" r="3" fill="#22D3EE" />
+  <!-- Small fin / accent -->
+  <path d="M52 74 C 44 80, 42 90, 48 94 C 54 98, 62 90, 58 80 Z" fill="#2563EB" opacity="0.8" />
+</svg>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepSeek Chat</title>
+  <link rel="stylesheet" href="{{stylesUri}}">
+</head>
+<body>
+  <!-- 头部控制栏 -->
+  <header class="chat-header">
+    <div class="header-left">
+      <div class="header-title">
+        <span>🐳 DeepSeek</span>
+        <span id="engine-tag" class="engine-badge">网页版</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-new-chat" class="icon-btn" title="新建会话">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z"/></svg>
+      </button>
+      <button id="btn-export" class="icon-btn" title="导出 Markdown">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
+      </button>
+      <button id="btn-claude-toggle" class="icon-btn" title="一键开启/关闭 Claude Code 直连配置 (.claude/settings.local.json)">
+        <span id="claude-icon" style="font-size: 12px; font-weight: bold;">⚡ Claude</span>
+      </button>
+      <button id="btn-settings" class="icon-btn" title="配置 UserToken">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0ZM1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0Zm7-3.25a.75.75 0 0 0-.75.75v3.25c0 .414.336.75.75.75h2.25a.75.75 0 0 0 0-1.5h-1.5V5.5a.75.75 0 0 0-.75-.75Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- 凭证失效警示横幅 -->
+  <div id="token-alert" class="alert-banner" style="display: none;">
+    <span>⚠️ 网页版凭据 (userToken) 已失效或未设置</span>
+    <div class="alert-actions">
+      <button id="btn-alert-open-web" class="alert-btn">打开网页</button>
+      <button id="btn-alert-set-token" class="alert-btn">配置凭据</button>
+    </div>
+  </div>
+
+  <!-- 人机验证 / 滑块挑战横幅 -->
+  <div id="captcha-alert" class="alert-banner warning" style="display: none;">
+    <span>🛡️ 请求过于频繁，触发了网页端滑块挑战验证</span>
+    <div class="alert-actions">
+      <button id="btn-captcha-open" class="alert-btn">去浏览器滑块</button>
+      <button id="btn-captcha-resume" class="alert-btn">已完成，继续</button>
+    </div>
+  </div>
+
+  <!-- 消息展示流区域 -->
+  <main id="messages-container" class="messages-container">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-state-icon">🐳</div>
+      <h3>DeepSeek 智能助手已就绪</h3>
+      <p>无需 API 费用，在 VS Code 中直接对话 DeepSeek-Web 深度思考与极速对话模型。</p>
+      <div class="quick-prompts">
+        <button class="quick-prompt-btn" data-prompt="/explain 解释当前编辑器中打开的代码">
+          <span>💡</span> 解释当前文件核心逻辑
+        </button>
+        <button class="quick-prompt-btn" data-prompt="/refactor 重构当前选中的代码以提升性能和可读性">
+          <span>⚡</span> 重构优化代码
+        </button>
+        <button class="quick-prompt-btn" data-prompt="/bugfix 检查当前代码中潜在的空指针或异常边界 Bug">
+          <span>🐛</span> 排查代码潜在 Bug
+        </button>
+        <button class="quick-prompt-btn" data-prompt="/test 为当前函数生成完整的单元测试用例">
+          <span>🧪</span> 生成单元测试
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- 技能命令弹窗 -->
+  <div id="skills-popup" class="skills-popup">
+    <!-- 动态插入技能列表 -->
+  </div>
+
+  <!-- 底部输入区域 -->
+  <footer class="input-area">
+    <!-- 上下文标签栏 -->
+    <div id="context-bar" class="context-bar" style="display: none;">
+      <span class="context-tag">
+        <span id="context-tag-text">📄 文件上下文</span>
+        <span id="btn-remove-context" class="tag-remove" title="移除上下文">✕</span>
+      </span>
+    </div>
+
+    <!-- 模型与选项配置栏 -->
+    <div class="controls-bar">
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <select id="model-select" class="select-control">
+          <option value="deepseek-web">DeepSeek-Web (深度思考)</option>
+          <option value="deepseek-chat-web">DeepSeek-Web (极速对话)</option>
+        </select>
+        <label class="checkbox-label" title="开启 DeepSeek 网页端联网检索">
+          <input type="checkbox" id="search-checkbox">
+          <span>联网搜索</span>
+        </label>
+      </div>
+      <div style="font-size: 11px; color: var(--vscode-descriptionForeground);">
+        <span>输入 <code>/</code> 快捷调用技能</span>
+      </div>
+    </div>
+
+    <!-- 输入框与发送按钮 -->
+    <div class="input-box-wrapper">
+      <textarea id="chat-input" placeholder="输入问题，Shift+Enter 换行，/ 唤起预设技能..." rows="1"></textarea>
+      <button id="send-btn" class="send-btn" title="发送 (Enter)">
+        <span id="send-btn-icon">➤</span>
+      </button>
+    </div>
+  </footer>
+
+  <script src="{{scriptsUri}}"></script>
+</body>
+</html>
+

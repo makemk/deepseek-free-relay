@@ -1,0 +1,255 @@
+{
+  "name": "deepseek-free-relay",
+  "displayName": "DeepSeek Free Relay (网页版桥接)",
+  "description": "在 VS Code 与 Claude Code 中直接接入 DeepSeek 网页版（支持深度思考 / 极速对话 / 全网搜索 / 工具调用），免 API 充值与额度消耗，提供代码解释、重构与自动更新支持。",
+  "version": "1.1.0",
+  "publisher": "makemk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/makemk/deepseek-free-relay"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Snippets",
+    "Education"
+  ],
+  "keywords": [
+    "deepseek",
+    "deepseek-web",
+    "ai assistant",
+    "claude code",
+    "reasoning"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deepseek-web-sidebar",
+          "title": "DeepSeek Web",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "deepseek-web-sidebar": [
+        {
+          "type": "webview",
+          "id": "deepseek.chatView",
+          "name": "DeepSeek 智能助手"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "deepseek.openChat",
+        "title": "DeepSeek: 打开对话侧边栏",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.setToken",
+        "title": "DeepSeek: 配置网页版 UserToken (免 API 额度)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.newSession",
+        "title": "DeepSeek: 新建对话会话",
+        "icon": "$(add)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.exportMarkdown",
+        "title": "DeepSeek: 导出当前对话为 Markdown",
+        "icon": "$(export)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.clearChat",
+        "title": "DeepSeek: 清空当前对话",
+        "icon": "$(clear-all)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.startProxy",
+        "title": "DeepSeek: 启动本地代理服务 (端口 9999)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.stopProxy",
+        "title": "DeepSeek: 停止本地代理服务",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.enableClaudeConfig",
+        "title": "DeepSeek: 一键开启 Claude Code 直连配置 (.claude/settings.local.json)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.disableClaudeConfig",
+        "title": "DeepSeek: 一键关闭 Claude Code 直连配置",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.toggleClaudeConfig",
+        "title": "DeepSeek: 切换 Claude Code 直连配置 (开启/关闭)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.explainCode",
+        "title": "DeepSeek: 解释选中的代码",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.refactorCode",
+        "title": "DeepSeek: 重构与优化代码",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.fixCode",
+        "title": "DeepSeek: 检查并修复代码缺陷 (Bug Fix)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.generateTests",
+        "title": "DeepSeek: 为当前代码生成单元测试",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.addComments",
+        "title": "DeepSeek: 为代码添加规范注释与文档",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.checkForUpdates",
+        "title": "DeepSeek: 检查插件更新 (Check for Updates)",
+        "icon": "$(cloud-download)",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.setUpdateUrl",
+        "title": "DeepSeek: 配置更新地址 (Configure Update URL)",
+        "category": "DeepSeek"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "deepseek.explainCode",
+          "when": "editorHasSelection",
+          "group": "deepseek@1"
+        },
+        {
+          "command": "deepseek.refactorCode",
+          "when": "editorHasSelection",
+          "group": "deepseek@2"
+        },
+        {
+          "command": "deepseek.fixCode",
+          "when": "editorHasSelection",
+          "group": "deepseek@3"
+        },
+        {
+          "command": "deepseek.generateTests",
+          "when": "editorHasSelection",
+          "group": "deepseek@4"
+        },
+        {
+          "command": "deepseek.addComments",
+          "when": "editorHasSelection",
+          "group": "deepseek@5"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "deepseek.newSession",
+          "when": "view == deepseek.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "deepseek.clearChat",
+          "when": "view == deepseek.chatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "deepseek.exportMarkdown",
+          "when": "view == deepseek.chatView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "deepseek.setToken",
+          "when": "view == deepseek.chatView",
+          "group": "navigation@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DeepSeek Web",
+      "properties": {
+        "deepseek.model": {
+          "type": "string",
+          "enum": [
+            "deepseek-web",
+            "deepseek-chat-web"
+          ],
+          "enumDescriptions": [
+            "DeepSeek-Web（深度思考模型，展示思考过程）",
+            "DeepSeek-Web（极速对话模型）"
+          ],
+          "default": "deepseek-chat-web",
+          "description": "默认使用的 DeepSeek 模型 (deepseek-chat-web 极速模型 / deepseek-web 深度思考模型)"
+        },
+        "deepseek.searchEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否开启网页版联网搜索功能"
+        },
+        "deepseek.autoStartProxy": {
+          "type": "boolean",
+          "default": true,
+          "description": "VS Code 启动时是否自动在后台运行本地代理服务 (端口 9999)"
+        },
+        "deepseek.toolPacingIntervalMs": {
+          "type": "number",
+          "default": 2000,
+          "description": "自动化连续工具调用之间的最小安全冷却时间（毫秒），防人机验证风控"
+        },
+        "deepseek.defaultThinkingOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "R1 深度思考过程在生成中是否默认展开"
+        },
+        "deepseek.updateUrl": {
+          "type": "string",
+          "default": "https://github.com/makemk/deepseek-free-relay",
+          "description": "自定义插件更新检查地址。支持 GitHub 仓库链接（如 https://github.com/makemk/deepseek-free-relay ）、GitHub Release API 链接或自定义版本 JSON 地址。留空将使用默认 GitHub 仓库地址。"
+        },
+        "deepseek.autoCheckUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否在 VS Code 启动时自动检查插件更新"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "mcp": "node bin/mcp-server.js",
+    "proxy": "node bin/proxy-server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.1",
+    "typescript": "^5.3.3"
+  }
+}
