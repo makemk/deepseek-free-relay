@@ -124,13 +124,13 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
     }
   }
 
-  // 2. 子智能体汇报已交付极速闭环 (彻底杜绝 SubagentHandback 重复调用与循环报错)
-  if (PromptInjector.isHandbackAlreadyDelivered(payload.messages)) {
-    console.log('[Claude Code Agent] 🏁 识别到子智能体此前已交付 SubagentHandback，直接极速返回 end_turn 闭环任务');
+  // 2. 子智能体交付后即时收尾闭环 (仅当当前确为子智能体运行环境、且上一轮刚调用过 SubagentHandback 收到反馈时极速闭环)
+  if (PromptInjector.isHandbackClosingTurn(payload.messages, payload.tools)) {
+    console.log('[Claude Code Agent] 🏁 识别到子智能体刚完成 SubagentHandback 交付，直接极速返回 end_turn 闭环任务');
     const msgId = `msg_hb_done_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const returnModel = payload.model || PROXY_CONFIG.FAST_MODEL;
     const stream = !!payload.stream;
-    const completionText = '子智能体工作报告此前已成功交付，当前任务已圆满完成。';
+    const completionText = '工作报告已交付完成。';
 
     if (stream) {
       res.writeHead(200, {
@@ -506,7 +506,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
 
         // 子智能体交付强力兜底：若子智能体尚未交付报告且结束本轮没有调用任何工具，自动将最终输出合成为 SubagentHandback
         const handbackTool = Array.isArray(tools) ? tools.find(t => t.name && (t.name.toLowerCase() === 'subagenthandback' || t.name.toLowerCase() === 'subagent_handback' || t.name.toLowerCase() === 'handback')) : undefined;
-        if (isSubagent && !PromptInjector.isHandbackAlreadyDelivered(payload.messages) && emittedToolCalls.length === 0) {
+        if (isSubagent && !PromptInjector.hasCalledHandback(payload.messages) && emittedToolCalls.length === 0) {
           const reportText = fullText.trim() || fullReasoning.trim();
           const hasExecutionTools = Array.isArray(tools) && tools.some(t => t.name && ['bash', 'write', 'edit', 'read'].includes(t.name.toLowerCase()));
           const hasPriorToolExecution = Array.isArray(payload.messages) && payload.messages.some(m => Array.isArray(m.content) && m.content.some((b: any) => b?.type === 'tool_result'));
@@ -621,7 +621,7 @@ export async function handleAnthropicMessages(req: http.IncomingMessage, res: ht
 
         // 子智能体交付兜底 (非流式)
         const handbackTool = Array.isArray(tools) ? tools.find(t => t.name && (t.name.toLowerCase() === 'subagenthandback' || t.name.toLowerCase() === 'subagent_handback' || t.name.toLowerCase() === 'handback')) : undefined;
-        if (isSubagent && !PromptInjector.isHandbackAlreadyDelivered(payload.messages) && toolCalls.length === 0) {
+        if (isSubagent && !PromptInjector.hasCalledHandback(payload.messages) && toolCalls.length === 0) {
           const reportText = cleanText.trim() || fullReasoning.trim();
           const hasExecutionTools = Array.isArray(tools) && tools.some(t => t.name && ['bash', 'write', 'edit', 'read'].includes(t.name.toLowerCase()));
           const hasPriorToolExecution = Array.isArray(payload.messages) && payload.messages.some(m => Array.isArray(m.content) && m.content.some((b: any) => b?.type === 'tool_result'));

@@ -326,9 +326,9 @@ ${toolLines}
 `;
   }
   /**
-   * 检查消息历史中是否已经成功交付过 SubagentHandback
+   * 检查消息历史中是否已经调用过 SubagentHandback
    */
-  static isHandbackAlreadyDelivered(messages) {
+  static hasCalledHandback(messages) {
     if (!Array.isArray(messages) || messages.length === 0)
       return false;
     for (const m of messages) {
@@ -347,20 +347,54 @@ ${toolLines}
             return true;
           }
         }
-      } else if (m.role === "user") {
-        if (Array.isArray(m.content)) {
-          for (const block of m.content) {
-            if (block?.type === "tool_result") {
-              const contentStr = typeof block.content === "string" ? block.content : JSON.stringify(block.content || "");
-              if (contentStr.includes("already delivered") || contentStr.includes("SubagentHandback delivers one report") || contentStr.includes("Nothing was sent: your report was already delivered")) {
-                return true;
-              }
-            }
+      }
+    }
+    return false;
+  }
+  /**
+   * 判断当前请求是否属于【子智能体在交付 SubagentHandback 后的即时收尾轮次】
+   * 必须同时满足以下极严格条件，严禁在主智能体或用户新发送指令时误判：
+   * 1. tools 中必须包含 SubagentHandback 工具定义 (证明当前确为子智能体运行环境)
+   * 2. 消息历史至少有 2 条 (必须包含前一轮 assistant 发起 handback 与本轮 user 反馈的 tool_result)
+   * 3. 消息末尾的 user 消息必须是工具执行反馈 (tool_result)，绝不能是纯文本人类指令 (如 "继续"、"换一个"、"。。")
+   * 4. 紧邻前一条 assistant 消息调用了 SubagentHandback，或当前 tool_result 明确包含单次交付提示
+   */
+  static isHandbackClosingTurn(messages, tools) {
+    if (!Array.isArray(tools) || tools.length === 0)
+      return false;
+    const hasHandback = tools.some((t) => {
+      const name = (t.name || t.function?.name || "").toLowerCase();
+      return name === "subagenthandback" || name === "subagent_handback" || name === "handback";
+    });
+    if (!hasHandback)
+      return false;
+    if (!Array.isArray(messages) || messages.length < 2)
+      return false;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "user")
+      return false;
+    if (typeof lastMsg.content === "string")
+      return false;
+    if (Array.isArray(lastMsg.content)) {
+      const toolResults = lastMsg.content.filter((b) => b?.type === "tool_result");
+      if (toolResults.length === 0)
+        return false;
+      const prevMsg = messages[messages.length - 2];
+      if (prevMsg && prevMsg.role === "assistant" && Array.isArray(prevMsg.content)) {
+        const calledHandback = prevMsg.content.some((b) => {
+          if (b?.type === "tool_use" && typeof b.name === "string") {
+            const name = b.name.toLowerCase();
+            return name === "subagenthandback" || name === "subagent_handback" || name === "handback";
           }
-        } else if (typeof m.content === "string") {
-          if (m.content.includes("your report was already delivered") || m.content.includes("SubagentHandback delivers one report")) {
-            return true;
-          }
+          return false;
+        });
+        if (calledHandback)
+          return true;
+      }
+      for (const tr of toolResults) {
+        const contentStr = typeof tr.content === "string" ? tr.content : JSON.stringify(tr.content || "");
+        if (contentStr.includes("already delivered") || contentStr.includes("SubagentHandback delivers one report") || contentStr.includes("Nothing was sent: your report was already delivered")) {
+          return true;
         }
       }
     }
@@ -448,7 +482,7 @@ ${contentStr.trim()}`);
     if (tools && tools.length > 0) {
       const isSubagent = tools.some((t) => t.name && (t.name.toLowerCase() === "subagenthandback" || t.name.toLowerCase() === "subagent_handback"));
       if (isSubagent) {
-        if (this.isHandbackAlreadyDelivered(messages)) {
+        if (this.hasCalledHandback(messages)) {
           parts.push(`
 ================================================================================
 \u3010\u5B50\u667A\u80FD\u4F53\u4EFB\u52A1\u5DF2\u5706\u6EE1\u7ED3\u675F (SUBAGENT TASK COMPLETE)\u3011
@@ -557,7 +591,7 @@ ${toolsPrompt}`);
 function stripOrphanToolTags(text) {
   if (!text)
     return "";
-  return text.replace(/<\/?(?:[｜|\uff5c]{1,2}DSML[｜|\uff5c]{1,2}\s*)?(?:calls|invoke|parameter|tool_call|tool|tools|function_calls?|function_call)(?:\s+[^>]*)?>/gi, "").replace(/<[｜|\uff5c]{1,2}tool[^\uff5c|>]*[｜|\uff5c]{1,2}>/gi, "").replace(/<\/\s*(?:calls|invoke|parameter|tool_call|tool|tools)[^>]*>/gi, "").replace(/(?<![</]tool)_call>/gi, "").replace(/(?<![</][\w\uff5c|]*)calls>/gi, "").replace(/(?<![</][\w\uff5c|]*)invoke>/gi, "").replace(/(?<![</][\w\uff5c|]*)parameter>/gi, "").replace(/(?<!<)\btool_call>/gi, "").replace(/(?:^|\n)\s*(?:SubagentHandback)\s*(?=\n|$)/gi, "");
+  return text.replace(/<\/?(?:[｜|\uff5c]{1,2}DSML[｜|\uff5c]{1,2}\s*)?(?:calls|invoke|parameter|tool_call|tool|tools|function_calls?|function_call)(?:\s+[^>]*)?>/gi, "").replace(/<[｜|\uff5c]{1,2}tool[^\uff5c|>]*[｜|\uff5c]{1,2}>/gi, "").replace(/<\/\s*(?:calls|invoke|parameter|tool_call|tool|tools)[^>]*>/gi, "").replace(/(?<![</]tool)_call>/gi, "").replace(/(?<![</][\w\uff5c|]*)calls>/gi, "").replace(/(?<![</][\w\uff5c|]*)invoke>/gi, "").replace(/(?<![</][\w\uff5c|]*)parameter>/gi, "").replace(/(?<!<)\btool_call>/gi, "").replace(/(?:^|\n)\s*(?:SubagentHandback)\s*(?=\n|$)/gi, "").replace(/<\/?\s*(?:[｜|\uff5c]{1,2}DSML[｜|\uff5c]{1,2}\s*)?(?:calls|invoke|parameter|tool_call|tool|tools|function_calls?|function_call)\b[^>]*$/gi, "").replace(/<\/?\s*(?:[｜|\uff5c]{1,2}tool[^\uff5c|>]*)$/gi, "").replace(/<\/?\s*tool(?:_call)?[^>]*$/gi, "");
 }
 var TOOL_NAME_ALIASES = {
   "write": "Write",
@@ -1863,12 +1897,12 @@ data: ${JSON.stringify({ type: "message_stop" })}
       return;
     }
   }
-  if (PromptInjector.isHandbackAlreadyDelivered(payload.messages)) {
-    console.log("[Claude Code Agent] \u{1F3C1} \u8BC6\u522B\u5230\u5B50\u667A\u80FD\u4F53\u6B64\u524D\u5DF2\u4EA4\u4ED8 SubagentHandback\uFF0C\u76F4\u63A5\u6781\u901F\u8FD4\u56DE end_turn \u95ED\u73AF\u4EFB\u52A1");
+  if (PromptInjector.isHandbackClosingTurn(payload.messages, payload.tools)) {
+    console.log("[Claude Code Agent] \u{1F3C1} \u8BC6\u522B\u5230\u5B50\u667A\u80FD\u4F53\u521A\u5B8C\u6210 SubagentHandback \u4EA4\u4ED8\uFF0C\u76F4\u63A5\u6781\u901F\u8FD4\u56DE end_turn \u95ED\u73AF\u4EFB\u52A1");
     const msgId = `msg_hb_done_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const returnModel = payload.model || PROXY_CONFIG.FAST_MODEL;
     const stream2 = !!payload.stream;
-    const completionText = "\u5B50\u667A\u80FD\u4F53\u5DE5\u4F5C\u62A5\u544A\u6B64\u524D\u5DF2\u6210\u529F\u4EA4\u4ED8\uFF0C\u5F53\u524D\u4EFB\u52A1\u5DF2\u5706\u6EE1\u5B8C\u6210\u3002";
+    const completionText = "\u5DE5\u4F5C\u62A5\u544A\u5DF2\u4EA4\u4ED8\u5B8C\u6210\u3002";
     if (stream2) {
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -2261,7 +2295,7 @@ data: ${JSON.stringify({ type: "content_block_stop", index: streamBlockIndex })}
         }
         closeTextBlock();
         const handbackTool = Array.isArray(tools) ? tools.find((t) => t.name && (t.name.toLowerCase() === "subagenthandback" || t.name.toLowerCase() === "subagent_handback" || t.name.toLowerCase() === "handback")) : void 0;
-        if (isSubagent && !PromptInjector.isHandbackAlreadyDelivered(payload.messages) && emittedToolCalls.length === 0) {
+        if (isSubagent && !PromptInjector.hasCalledHandback(payload.messages) && emittedToolCalls.length === 0) {
           const reportText = fullText.trim() || fullReasoning.trim();
           const hasExecutionTools = Array.isArray(tools) && tools.some((t) => t.name && ["bash", "write", "edit", "read"].includes(t.name.toLowerCase()));
           const hasPriorToolExecution = Array.isArray(payload.messages) && payload.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b?.type === "tool_result"));
@@ -2384,7 +2418,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
           });
         }
         const handbackTool = Array.isArray(tools) ? tools.find((t) => t.name && (t.name.toLowerCase() === "subagenthandback" || t.name.toLowerCase() === "subagent_handback" || t.name.toLowerCase() === "handback")) : void 0;
-        if (isSubagent && !PromptInjector.isHandbackAlreadyDelivered(payload.messages) && toolCalls.length === 0) {
+        if (isSubagent && !PromptInjector.hasCalledHandback(payload.messages) && toolCalls.length === 0) {
           const reportText = cleanText.trim() || fullReasoning.trim();
           const hasExecutionTools = Array.isArray(tools) && tools.some((t) => t.name && ["bash", "write", "edit", "read"].includes(t.name.toLowerCase()));
           const hasPriorToolExecution = Array.isArray(payload.messages) && payload.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b?.type === "tool_result"));

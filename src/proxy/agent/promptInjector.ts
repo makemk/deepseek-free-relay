@@ -105,9 +105,9 @@ ${toolLines}
   }
 
   /**
-   * 检查消息历史中是否已经成功交付过 SubagentHandback
+   * 检查消息历史中是否已经调用过 SubagentHandback
    */
-  public static isHandbackAlreadyDelivered(messages?: any[]): boolean {
+  public static hasCalledHandback(messages?: any[]): boolean {
     if (!Array.isArray(messages) || messages.length === 0) return false;
     for (const m of messages) {
       if (m.role === 'assistant') {
@@ -125,23 +125,61 @@ ${toolLines}
             return true;
           }
         }
-      } else if (m.role === 'user') {
-        if (Array.isArray(m.content)) {
-          for (const block of m.content) {
-            if (block?.type === 'tool_result') {
-              const contentStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '');
-              if (contentStr.includes('already delivered') || contentStr.includes('SubagentHandback delivers one report') || contentStr.includes('Nothing was sent: your report was already delivered')) {
-                return true;
-              }
-            }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 判断当前请求是否属于【子智能体在交付 SubagentHandback 后的即时收尾轮次】
+   * 必须同时满足以下极严格条件，严禁在主智能体或用户新发送指令时误判：
+   * 1. tools 中必须包含 SubagentHandback 工具定义 (证明当前确为子智能体运行环境)
+   * 2. 消息历史至少有 2 条 (必须包含前一轮 assistant 发起 handback 与本轮 user 反馈的 tool_result)
+   * 3. 消息末尾的 user 消息必须是工具执行反馈 (tool_result)，绝不能是纯文本人类指令 (如 "继续"、"换一个"、"。。")
+   * 4. 紧邻前一条 assistant 消息调用了 SubagentHandback，或当前 tool_result 明确包含单次交付提示
+   */
+  public static isHandbackClosingTurn(messages?: any[], tools?: any[]): boolean {
+    if (!Array.isArray(tools) || tools.length === 0) return false;
+    const hasHandback = tools.some(t => {
+      const name = (t.name || t.function?.name || '').toLowerCase();
+      return name === 'subagenthandback' || name === 'subagent_handback' || name === 'handback';
+    });
+    if (!hasHandback) return false;
+
+    if (!Array.isArray(messages) || messages.length < 2) return false;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'user') return false;
+
+    // 若最后一条消息是纯文本（人类用户在终端输入的指令，如 "继续"、"换一个"、"。。" 等），绝对不是工具交付闭环！
+    if (typeof lastMsg.content === 'string') return false;
+
+    if (Array.isArray(lastMsg.content)) {
+      // 必须包含 tool_result 块
+      const toolResults = lastMsg.content.filter((b: any) => b?.type === 'tool_result');
+      if (toolResults.length === 0) return false;
+
+      // 检查倒数第二条 assistant 消息是否调用了 SubagentHandback
+      const prevMsg = messages[messages.length - 2];
+      if (prevMsg && prevMsg.role === 'assistant' && Array.isArray(prevMsg.content)) {
+        const calledHandback = prevMsg.content.some((b: any) => {
+          if (b?.type === 'tool_use' && typeof b.name === 'string') {
+            const name = b.name.toLowerCase();
+            return name === 'subagenthandback' || name === 'subagent_handback' || name === 'handback';
           }
-        } else if (typeof m.content === 'string') {
-          if (m.content.includes('your report was already delivered') || m.content.includes('SubagentHandback delivers one report')) {
-            return true;
-          }
+          return false;
+        });
+        if (calledHandback) return true;
+      }
+
+      // 或者 tool_result 内容中明确包含 Claude Code 官方单次交付提示
+      for (const tr of toolResults) {
+        const contentStr = typeof tr.content === 'string' ? tr.content : JSON.stringify(tr.content || '');
+        if (contentStr.includes('already delivered') || contentStr.includes('SubagentHandback delivers one report') || contentStr.includes('Nothing was sent: your report was already delivered')) {
+          return true;
         }
       }
     }
+
     return false;
   }
 
@@ -236,7 +274,7 @@ ${toolLines}
     if (tools && tools.length > 0) {
       const isSubagent = tools.some(t => t.name && (t.name.toLowerCase() === 'subagenthandback' || t.name.toLowerCase() === 'subagent_handback'));
       if (isSubagent) {
-        if (this.isHandbackAlreadyDelivered(messages)) {
+        if (this.hasCalledHandback(messages)) {
           parts.push(`
 ================================================================================
 【子智能体任务已圆满结束 (SUBAGENT TASK COMPLETE)】

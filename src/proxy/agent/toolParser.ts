@@ -19,7 +19,11 @@ export function stripOrphanToolTags(text: string): string {
     .replace(/(?<![</][\w\uff5c|]*)parameter>/gi, '')
     .replace(/(?<!<)\btool_call>/gi, '')
     // 5. 孤立的工具名回声 (如换行后孤立出现的 SubagentHandback)
-    .replace(/(?:^|\n)\s*(?:SubagentHandback)\s*(?=\n|$)/gi, '');
+    .replace(/(?:^|\n)\s*(?:SubagentHandback)\s*(?=\n|$)/gi, '')
+    // 6. 末尾未闭合的残缺标签 (如 </tool, </tool_call, <tool_call, <calls 等，杜绝截断泄漏到终端)
+    .replace(/<\/?\s*(?:[｜|\uff5c]{1,2}DSML[｜|\uff5c]{1,2}\s*)?(?:calls|invoke|parameter|tool_call|tool|tools|function_calls?|function_call)\b[^>]*$/gi, '')
+    .replace(/<\/?\s*(?:[｜|\uff5c]{1,2}tool[^\uff5c|>]*)$/gi, '')
+    .replace(/<\/?\s*tool(?:_call)?[^>]*$/gi, '');
 }
 
 /**
