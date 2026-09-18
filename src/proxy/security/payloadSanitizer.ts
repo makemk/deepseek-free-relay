@@ -38,8 +38,16 @@ export class PayloadSanitizer {
     }
 
     console.warn(`[PayloadSanitizer] ⚡ 提示词 (${prompt.length} 字符) 超过安全预算 (${maxBudget})，执行结构化精简以提速 Prefill`);
-    const head = prompt.slice(0, 8000);
-    const tail = prompt.slice(prompt.length - 18000);
+    let head = prompt.slice(0, 8000);
+    const lastNewline = head.lastIndexOf('\n');
+    if (lastNewline > 4000) {
+      head = head.slice(0, lastNewline);
+    }
+    let tail = prompt.slice(prompt.length - 18000);
+    const firstNewline = tail.indexOf('\n');
+    if (firstNewline !== -1 && firstNewline < 2000) {
+      tail = tail.slice(firstNewline + 1);
+    }
     return `${head}\n\n... [⚡ 上下文自动紧凑折叠：已略过早期历史日志，确保极速生成] ...\n\n${tail}`;
   }
 }

@@ -224,7 +224,11 @@ export function repairAndParseJson(rawJson: string): Record<string, any> {
       if (typeMatch) {
         inputObj.subagent_type = typeMatch[1];
       }
-      const promptMatch = trimmed.match(/"(?:prompt|task|description|instruction|query|message)":\s*"([\s\S]*?)(?:"\s*\}|\s*<\/(?:tool_call|[｜|\uff5c]{1,2}DSML|invoke)|$)/i);
+      const descMatch = trimmed.match(/"(?:description|title|desc|summary)":\s*"([^"]+)"/i);
+      if (descMatch) {
+        inputObj.description = descMatch[1];
+      }
+      const promptMatch = trimmed.match(/"(?:prompt|task|instruction|query|message)":\s*"([\s\S]*?)(?:"\s*,\s*"description"|(?:"\s*\}|\s*<\/(?:tool_call|[｜|\uff5c]{1,2}DSML|invoke)|$))/i);
       if (promptMatch) {
         inputObj.prompt = promptMatch[1];
       }
@@ -433,12 +437,27 @@ export function normalizeToolCall(name: string, rawInput: any, tools?: ToolDefin
   // 9. 针对 Agent / Task 工具的强力补全与容错 (Claude Code 原生子智能体规范)
   else if (targetName === 'agent' || targetName === 'task') {
     if (!input.prompt) {
-      input.prompt = input.task || input.description || input.instruction || input.message || input.query || '';
+      input.prompt = input.task || input.instruction || input.message || input.query || '';
     }
+    if (typeof input.prompt !== 'string') input.prompt = String(input.prompt || '');
+
+    // description 是 Claude Code Agent 工具必须严格具备的字符串属性 (z.string())
+    if (input.description === undefined || input.description === null) {
+      input.description = input.prompt.slice(0, 30).replace(/\s+/g, ' ').trim() || 'Subagent task';
+    } else if (typeof input.description !== 'string') {
+      if (typeof input.description === 'object') {
+        input.description = (input.description as any).task || (input.description as any).prompt || (input.description as any).title || JSON.stringify(input.description);
+      } else {
+        input.description = String(input.description);
+      }
+    }
+    if (!input.description || typeof input.description !== 'string' || !input.description.trim()) {
+      input.description = input.prompt.slice(0, 30).replace(/\s+/g, ' ').trim() || 'Subagent task';
+    }
+
     if (!input.subagent_type) {
       input.subagent_type = input.type || input.agent_type || input.agentType || 'general';
     }
-    if (typeof input.prompt !== 'string') input.prompt = String(input.prompt || '');
     if (typeof input.subagent_type !== 'string') input.subagent_type = String(input.subagent_type || 'general');
   }
 

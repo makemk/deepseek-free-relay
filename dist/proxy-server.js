@@ -98,9 +98,9 @@ var PROXY_CONFIG = {
     MAX_AGE_MS: 15 * 60 * 1e3,
     // 单会话最大存活 15 分钟
     MAX_TURNS: 8,
-    // 单会话最大交互轮数 (由25降至8，防止服务端消息树膨胀爆炸)
-    MAX_PROMPT_CHARS: 24e3
-    // 提示词字符超 2.4 万时自动强制开辟全新会话
+    // 单会话最大交互轮数 (防消息树过度深层嵌套)
+    MAX_PROMPT_CHARS: 6e4
+    // 提示词超 6 万字符时开辟新会话 (放宽以容纳子智能体回传报告复用，避免频繁建会话触发高难度 PoW)
   },
   // 网络强超时控制 (杜绝长连接无响应无限挂起假死)
   TIMEOUTS: {
@@ -232,8 +232,16 @@ ${tail}`;
       return prompt;
     }
     console.warn(`[PayloadSanitizer] \u26A1 \u63D0\u793A\u8BCD (${prompt.length} \u5B57\u7B26) \u8D85\u8FC7\u5B89\u5168\u9884\u7B97 (${maxBudget})\uFF0C\u6267\u884C\u7ED3\u6784\u5316\u7CBE\u7B80\u4EE5\u63D0\u901F Prefill`);
-    const head = prompt.slice(0, 8e3);
-    const tail = prompt.slice(prompt.length - 18e3);
+    let head = prompt.slice(0, 8e3);
+    const lastNewline = head.lastIndexOf("\n");
+    if (lastNewline > 4e3) {
+      head = head.slice(0, lastNewline);
+    }
+    let tail = prompt.slice(prompt.length - 18e3);
+    const firstNewline = tail.indexOf("\n");
+    if (firstNewline !== -1 && firstNewline < 2e3) {
+      tail = tail.slice(firstNewline + 1);
+    }
     return `${head}
 
 ... [\u26A1 \u4E0A\u4E0B\u6587\u81EA\u52A8\u7D27\u51D1\u6298\u53E0\uFF1A\u5DF2\u7565\u8FC7\u65E9\u671F\u5386\u53F2\u65E5\u5FD7\uFF0C\u786E\u4FDD\u6781\u901F\u751F\u6210] ...
@@ -311,11 +319,11 @@ ${toolLines}
 </tool_call>
 \u203B \u8BF4\u660E\uFF1Askill \u53C2\u6570\u5FC5\u987B\u4E3A\u53EF\u7528\u6280\u80FD\u5E93\u4E2D\u7684\u6280\u80FD\u540D\u79F0\uFF08\u4E0D\u8981\u5E26\u659C\u6760\u524D\u7F00\uFF09\uFF0C\u4E25\u7981\u81C6\u9020\u4E0D\u5B58\u5728\u7684\u6280\u80FD\u540D\uFF01
 
-8. \u89C4\u8303\u793A\u4F8B (\u6D3E\u751F\u5B50\u667A\u80FD\u4F53 Agent / Task \u5904\u7406\u590D\u6742\u5B50\u4EFB\u52A1):
+8. \u89C4\u8303\u793A\u4F8B (\u6D3E\u751F\u5B50\u667A\u80FD\u4F53 Agent / Task \u5904\u7406\u590D\u6742\u5B50\u4EFB\u52A1 - description \u4E0E prompt \u5747\u4E3A\u5FC5\u586B\u5B57\u7B26\u4E32):
 <tool_call>
-{"name": "Agent", "input": {"subagent_type": "general", "prompt": "\u6DF1\u5165\u8C03\u7814\u9879\u76EE\u76EE\u5F55\u7ED3\u6784\u5E76\u63D0\u53D6\u5173\u952E\u4EE3\u7801\u6587\u4EF6"}}
+{"name": "Agent", "input": {"description": "\u8C03\u7814\u516C\u53F8\u80CC\u666F\u4FE1\u606F", "prompt": "\u6DF1\u5165\u8C03\u7814\u9879\u76EE\u76EE\u5F55\u7ED3\u6784\u5E76\u63D0\u53D6\u5173\u952E\u4EE3\u7801\u6587\u4EF6", "subagent_type": "general"}}
 </tool_call>
-\u203B \u8BF4\u660E\uFF1A\u9047\u5230\u5E9E\u5927\u590D\u6742\u5DE5\u7A0B\u6216\u591A\u6B65\u9AA4\u8C03\u7814\u65F6\uFF0C\u53EF\u4E3B\u52A8\u8C03\u7528 Agent \u6216 Task \u6D3E\u751F\u5B50\u667A\u80FD\u4F53\u534F\u52A9\u5904\u7406\u3002
+\u203B \u8BF4\u660E\uFF1Adescription (\u77ED\u6807\u9898) \u4E0E prompt (\u5177\u4F53\u6267\u884C\u6307\u4EE4) \u5FC5\u987B\u5747\u4E3A\u6709\u6548\u975E\u7A7A\u5B57\u7B26\u4E32\uFF01\u9047\u5230\u5E9E\u5927\u590D\u6742\u5DE5\u7A0B\u6216\u591A\u6B65\u9AA4\u8C03\u7814\u65F6\uFF0C\u53EF\u4E3B\u52A8\u8C03\u7528 Agent \u6216 Task \u6D3E\u751F\u5B50\u667A\u80FD\u4F53\u534F\u52A9\u5904\u7406\u3002
 
 9. \u89C4\u8303\u793A\u4F8B (\u5B50\u667A\u80FD\u4F53\u5411\u4E3B\u667A\u80FD\u4F53\u4EA4\u4ED8\u6700\u7EC8\u5DE5\u4F5C\u62A5\u544A SubagentHandback - \u5FC5\u987B\u5305\u542B message):
 <tool_call>
@@ -526,7 +534,9 @@ ${contentStr.trim()}`);
 \u4F60\u5F53\u524D\u4F5C\u4E3A\u5168\u81EA\u4E3B\u7EC8\u7AEF Agent \u8FD0\u884C\uFF0C\u62E5\u6709\u672C\u5730\u5DE5\u5177\u6700\u9AD8\u6267\u884C\u6743\u9650\u3002\u7528\u6237\u5DF2\u660E\u786E\u671F\u671B\u4F60\u76F4\u63A5\u52A8\u624B\u63A8\u8FDB\u5B8C\u6210\u4EFB\u52A1\u3002
 1. \u3010\u7B80\u4F53\u4E2D\u6587\u4F18\u5148\u3011\uFF1A\u5411\u7528\u6237\u8F93\u51FA\u7684\u6240\u6709\u601D\u8003\u9610\u8FF0\u3001\u72B6\u6001\u8BF4\u660E\u3001\u4EE3\u7801\u89E3\u91CA\u4E0E\u4EFB\u52A1\u603B\u7ED3\uFF0C\u5FC5\u987B\u4E3B\u8981\u4F7F\u7528\u89C4\u8303\u7684\u3010\u7B80\u4F53\u4E2D\u6587\u3011\uFF01\u82F1\u6587\u4EC5\u7528\u4E8E\u4EE3\u7801\u8BED\u6CD5\u3001\u547D\u4EE4\u884C\u3001\u6587\u4EF6\u8DEF\u5F84\u4E0E\u5FC5\u8981\u4E13\u4E1A\u540D\u8BCD\uFF0C\u4E25\u7981\u8F93\u51FA\u5927\u6BB5\u7EAF\u82F1\u6587\u3002
 2. \u3010\u5185\u7F6E\u539F\u751F\u8054\u7F51 & \u4E25\u7981 curl \u641C\u7F51\u3011\uFF1A\u4F60\u5DF2\u5185\u7F6E\u539F\u751F\u5168\u7F51\u5B9E\u65F6\u8054\u7F51\u80FD\u529B\uFF0C\u4E91\u7AEF\u4F1A\u81EA\u52A8\u68C0\u7D22\u6700\u65B0\u77E5\u8BC6\u3002\u4E25\u7981\u5728 Bash \u4E2D\u4F7F\u7528 curl/wget \u6293\u53D6\u6216\u641C\u7D22\u7F51\u9875\u6587\u6863\uFF01\u7EC8\u7AEF\u547D\u4EE4\u4EC5\u7528\u4E8E\u672C\u5730\u5F00\u53D1\u3001\u6D4B\u8BD5\u4E0E\u6784\u5EFA\u3002
-3. \u3010\u7ACB\u5373\u884C\u52A8\u3011\uFF1A\u4E25\u7981\u53EA\u8F93\u51FA\u7A7A\u6D1E\u6587\u5B57\u5206\u6790\u3001\u65B9\u6848\u5EFA\u8BAE\u6216\u672A\u7ECF\u5DE5\u5177\u6267\u884C\u7684\u7406\u8BBA\u4EE3\u7801\uFF01\u82E5\u9700\u5206\u6790\u73AF\u5883\u3001\u68C0\u7D22/\u8BFB\u53D6\u6587\u4EF6\u3001\u7F16\u8F91\u4EE3\u7801\u3001\u6267\u884C\u547D\u4EE4\u3001\u8C03\u7528\u6280\u80FD\u6216\u6D3E\u751F\u5B50\u4EFB\u52A1\uFF0C\u5FC5\u987B\u5728\u5F53\u524D\u56DE\u7B54\u4E2D\u7ACB\u5373\u8F93\u51FA <tool_call>... \u89E6\u53D1\u6267\u884C\uFF01
+3. \u3010\u77E5\u884C\u5408\u4E00\u539F\u5219\u3011\uFF1A
+- \u82E5\u4EFB\u52A1\u9700\u8981\u64CD\u4F5C\u672C\u5730\u6587\u4EF6\u3001\u8FD0\u884C\u547D\u4EE4\u3001\u8C03\u7528\u6280\u80FD\u6216\u6D3E\u751F\u5B50\u4EFB\u52A1\uFF0C\u5FC5\u987B\u5728\u5F53\u524D\u56DE\u7B54\u4E2D\u7ACB\u5373\u8F93\u51FA <tool_call>... \u89E6\u53D1\u6267\u884C\uFF0C\u4E25\u7981\u53EA\u8F93\u51FA\u53E3\u5934\u5EFA\u8BAE\uFF01
+- \u82E5\u4EFB\u52A1\u6240\u9700\u7684\u64CD\u4F5C\u3001\u8C03\u7814\u6216\u5B50\u667A\u80FD\u4F53\u6D3E\u751F\u5DF2\u5168\u90E8\u5B8C\u6210\uFF08\u4F8B\u5982\u5DF2\u83B7\u53D6\u4E86\u5B50\u667A\u80FD\u4F53\u8FD4\u56DE\u7684\u5B8C\u6574\u8C03\u7814\u62A5\u544A\uFF09\uFF0C\u4F60\u5E94\u5F53\u7ACB\u5373\u7528\u89C4\u8303\u7684\u3010\u7B80\u4F53\u4E2D\u6587\u3011\u5411\u7528\u6237\u8F93\u51FA\u6761\u7406\u6E05\u6670\u3001\u7ED3\u6784\u5B8C\u6574\u7684\u9AD8\u8D28\u91CF\u6700\u7EC8\u6210\u679C\u6C47\u62A5\u4E0E\u603B\u7ED3\uFF0C\u65E0\u9700\u518D\u91CD\u590D\u8C03\u7528\u65E0\u610F\u4E49\u7684\u5DE5\u5177\uFF01
 ================================================================================
 `);
       }
@@ -592,7 +602,7 @@ ${toolsPrompt}`);
       parts.push(`
 ===============================================================================
 \u3010Agent \u7ACB\u5373\u884C\u52A8\u5F3A\u6307\u4EE4 (ACTION REQUIRED)\u3011
-\u4F60\u5F53\u524D\u4F5C\u4E3A\u5168\u81EA\u4E3B\u7EC8\u7AEF Agent \u8FD0\u884C\uFF0C\u5FC5\u987B\u4E3B\u8981\u4F7F\u7528\u89C4\u8303\u7684\u3010\u7B80\u4F53\u4E2D\u6587\u3011\u8FDB\u884C\u6C9F\u901A\u9610\u8FF0\u4E0E\u4EFB\u52A1\u6C47\u62A5\uFF08\u4EE3\u7801\u8BED\u6CD5\u4E0E\u547D\u4EE4\u9664\u5916\uFF09\uFF0C\u5DF2\u5185\u7F6E\u539F\u751F\u5168\u7F51\u5B9E\u65F6\u8054\u7F51\u80FD\u529B\uFF08\u4E25\u7981\u5728 Bash \u4E2D\u6EE5\u7528 curl/wget \u641C\u7D22\u6216\u6293\u53D6\u7F51\u9875\uFF09\uFF0C\u5E76\u7ACB\u5373\u5728\u56DE\u7B54\u4E2D\u8F93\u51FA <tool_call>... \u89E6\u53D1\u5DE5\u5177\u6267\u884C\uFF0C\u4E25\u7981\u53EA\u8F93\u51FA\u53E3\u5934\u5EFA\u8BAE\uFF01
+\u4F60\u5F53\u524D\u4F5C\u4E3A\u5168\u81EA\u4E3B\u7EC8\u7AEF Agent \u8FD0\u884C\uFF0C\u5FC5\u987B\u4E3B\u8981\u4F7F\u7528\u89C4\u8303\u7684\u3010\u7B80\u4F53\u4E2D\u6587\u3011\u8FDB\u884C\u6C9F\u901A\u9610\u8FF0\u4E0E\u4EFB\u52A1\u6C47\u62A5\uFF08\u4EE3\u7801\u8BED\u6CD5\u4E0E\u547D\u4EE4\u9664\u5916\uFF09\uFF0C\u5DF2\u5185\u7F6E\u539F\u751F\u5168\u7F51\u5B9E\u65F6\u8054\u7F51\u80FD\u529B\uFF08\u4E25\u7981\u5728 Bash \u4E2D\u6EE5\u7528 curl/wget \u641C\u7D22\u6216\u6293\u53D6\u7F51\u9875\uFF09\u3002\u9700\u8981\u6267\u884C\u64CD\u4F5C\u65F6\u7ACB\u5373\u8F93\u51FA <tool_call>... \u63A8\u8FDB\u4EFB\u52A1\uFF1B\u5F53\u6240\u6709\u64CD\u4F5C\u6216\u5B50\u4EFB\u52A1\u8C03\u7814\u5B8C\u6BD5\u65F6\uFF0C\u76F4\u63A5\u5411\u7528\u6237\u8F93\u51FA\u9AD8\u8D28\u91CF\u4E2D\u6587\u603B\u7ED3\u62A5\u544A\uFF01
 ===============================================================================
 `);
     }
@@ -762,7 +772,11 @@ function repairAndParseJson(rawJson) {
       if (typeMatch) {
         inputObj.subagent_type = typeMatch[1];
       }
-      const promptMatch = trimmed.match(/"(?:prompt|task|description|instruction|query|message)":\s*"([\s\S]*?)(?:"\s*\}|\s*<\/(?:tool_call|[｜|\uff5c]{1,2}DSML|invoke)|$)/i);
+      const descMatch = trimmed.match(/"(?:description|title|desc|summary)":\s*"([^"]+)"/i);
+      if (descMatch) {
+        inputObj.description = descMatch[1];
+      }
+      const promptMatch = trimmed.match(/"(?:prompt|task|instruction|query|message)":\s*"([\s\S]*?)(?:"\s*,\s*"description"|(?:"\s*\}|\s*<\/(?:tool_call|[｜|\uff5c]{1,2}DSML|invoke)|$))/i);
       if (promptMatch) {
         inputObj.prompt = promptMatch[1];
       }
@@ -947,13 +961,25 @@ function normalizeToolCall(name, rawInput, tools) {
     }
   } else if (targetName === "agent" || targetName === "task") {
     if (!input.prompt) {
-      input.prompt = input.task || input.description || input.instruction || input.message || input.query || "";
+      input.prompt = input.task || input.instruction || input.message || input.query || "";
+    }
+    if (typeof input.prompt !== "string")
+      input.prompt = String(input.prompt || "");
+    if (input.description === void 0 || input.description === null) {
+      input.description = input.prompt.slice(0, 30).replace(/\s+/g, " ").trim() || "Subagent task";
+    } else if (typeof input.description !== "string") {
+      if (typeof input.description === "object") {
+        input.description = input.description.task || input.description.prompt || input.description.title || JSON.stringify(input.description);
+      } else {
+        input.description = String(input.description);
+      }
+    }
+    if (!input.description || typeof input.description !== "string" || !input.description.trim()) {
+      input.description = input.prompt.slice(0, 30).replace(/\s+/g, " ").trim() || "Subagent task";
     }
     if (!input.subagent_type) {
       input.subagent_type = input.type || input.agent_type || input.agentType || "general";
     }
-    if (typeof input.prompt !== "string")
-      input.prompt = String(input.prompt || "");
     if (typeof input.subagent_type !== "string")
       input.subagent_type = String(input.subagent_type || "general");
   } else if (targetName === "subagenthandback" || targetName === "handback" || targetName === "subagent_handback") {
@@ -1271,6 +1297,16 @@ function extractDeepSeekDeltas(parsed, state) {
     }));
     return { textDelta, reasoningDelta, messageId, searchResults: state.searchResults };
   }
+  if (typeof parsed.p === "string" && (parsed.p === "response/content" || parsed.p.endsWith("/content") || parsed.p === "content")) {
+    if (typeof parsed.v === "string") {
+      textDelta += parsed.v;
+    }
+  }
+  if (typeof parsed.p === "string" && (parsed.p === "response/thinking_content" || parsed.p.endsWith("/thinking_content") || parsed.p.includes("thinking") || parsed.p.includes("reasoning"))) {
+    if (typeof parsed.v === "string") {
+      reasoningDelta += parsed.v;
+    }
+  }
   if (parsed.p === "response/fragments" && parsed.o === "APPEND" && Array.isArray(parsed.v)) {
     for (const frag of parsed.v) {
       const type = frag?.type ?? "RESPONSE";
@@ -1285,11 +1321,6 @@ function extractDeepSeekDeltas(parsed, state) {
       }
     }
   }
-  if (typeof parsed.p === "string" && (parsed.p.includes("thinking") || parsed.p.includes("reasoning"))) {
-    if (typeof parsed.v === "string") {
-      reasoningDelta += parsed.v;
-    }
-  }
   if (!parsed.p && typeof parsed.v === "string") {
     const curType = state.fragmentTypes[state.currentIndex] ?? "RESPONSE";
     if (curType === "THINK") {
@@ -1297,6 +1328,12 @@ function extractDeepSeekDeltas(parsed, state) {
     } else {
       textDelta += parsed.v;
     }
+  }
+  if (parsed.v?.response?.content && typeof parsed.v.response.content === "string") {
+    textDelta += parsed.v.response.content;
+  }
+  if (parsed.v?.response?.thinking_content && typeof parsed.v.response.thinking_content === "string") {
+    reasoningDelta += parsed.v.response.thinking_content;
   }
   const delta = parsed.choices?.[0]?.delta;
   if (delta) {

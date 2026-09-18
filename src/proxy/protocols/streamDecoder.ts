@@ -87,7 +87,21 @@ export function extractDeepSeekDeltas(
     return { textDelta, reasoningDelta, messageId, searchResults: state.searchResults };
   }
 
-  // 4. 状态更新: response/fragments APPEND (挂载新分片并附带初始文本/思考内容)
+  // 4. 显式 response/content 增量路径 (deepseek-chat-web 极速对话模型官方核心输出路径)
+  if (typeof parsed.p === 'string' && (parsed.p === 'response/content' || parsed.p.endsWith('/content') || parsed.p === 'content')) {
+    if (typeof parsed.v === 'string') {
+      textDelta += parsed.v;
+    }
+  }
+
+  // 5. 显式 response/thinking_content 或 thinking/reasoning 增量路径
+  if (typeof parsed.p === 'string' && (parsed.p === 'response/thinking_content' || parsed.p.endsWith('/thinking_content') || parsed.p.includes('thinking') || parsed.p.includes('reasoning'))) {
+    if (typeof parsed.v === 'string') {
+      reasoningDelta += parsed.v;
+    }
+  }
+
+  // 6. 状态更新: response/fragments APPEND (挂载新分片并附带初始文本/思考内容)
   if (parsed.p === 'response/fragments' && parsed.o === 'APPEND' && Array.isArray(parsed.v)) {
     for (const frag of parsed.v) {
       const type = frag?.type ?? 'RESPONSE';
@@ -103,14 +117,7 @@ export function extractDeepSeekDeltas(
     }
   }
 
-  // 5. 显式 thinking / reasoning 增量路径
-  if (typeof parsed.p === 'string' && (parsed.p.includes('thinking') || parsed.p.includes('reasoning'))) {
-    if (typeof parsed.v === 'string') {
-      reasoningDelta += parsed.v;
-    }
-  }
-
-  // 6. 正文或当前活动分片追加 (当 p 为空且 v 为字符串时，属于当前活动分片的流式增量)
+  // 7. 正文或当前活动分片追加 (当 p 为空且 v 为字符串时，属于当前活动分片的流式增量)
   if (!parsed.p && typeof parsed.v === 'string') {
     const curType = state.fragmentTypes[state.currentIndex] ?? 'RESPONSE';
     if (curType === 'THINK') {
@@ -120,7 +127,15 @@ export function extractDeepSeekDeltas(
     }
   }
 
-  // 7. 兼容标准 choices[0].delta 格式
+  // 8. 兼容初始快照包中的 content 与 thinking_content
+  if (parsed.v?.response?.content && typeof parsed.v.response.content === 'string') {
+    textDelta += parsed.v.response.content;
+  }
+  if (parsed.v?.response?.thinking_content && typeof parsed.v.response.thinking_content === 'string') {
+    reasoningDelta += parsed.v.response.thinking_content;
+  }
+
+  // 9. 兼容标准 choices[0].delta 格式
   const delta = parsed.choices?.[0]?.delta;
   if (delta) {
     if (delta.reasoning_content) {
@@ -131,7 +146,7 @@ export function extractDeepSeekDeltas(
     }
   }
 
-  // 8. 净化 DeepSeek 特有内部搜索引文标记: 将 [citation:1] 规范化为 [1]
+  // 10. 净化 DeepSeek 特有内部搜索引文标记: 将 [citation:1] 规范化为 [1]
   if (textDelta.includes('[citation:')) {
     textDelta = textDelta.replace(/\[citation:(\d+)\]/g, '[$1]');
   }
